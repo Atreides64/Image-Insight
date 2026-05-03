@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import func
 
 from app.database import Base, SessionLocal, engine
 from app.models import Photo
@@ -21,6 +23,16 @@ app = FastAPI(
     title="Image Insight API",
     description="Backend API for local-first media metadata analytics.",
     version="0.1.0",
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 Base.metadata.create_all(bind=engine)
 
@@ -114,4 +126,33 @@ def list_photos() -> dict[str, object]:
     return {
         "total_files": len(photos),
         "files": [format_photo(photo) for photo in photos],
+    }
+
+
+@app.get("/stats")
+def get_stats() -> dict[str, object]:
+    with SessionLocal() as session:
+        total_photos = session.query(func.count(Photo.id)).scalar() or 0
+        total_size_bytes = session.query(func.sum(Photo.size_bytes)).scalar() or 0
+        newest_modified_at = session.query(func.max(Photo.modified_at)).scalar()
+        oldest_modified_at = session.query(func.min(Photo.modified_at)).scalar()
+        file_type_rows = (
+            session.query(Photo.extension, func.count(Photo.id))
+            .group_by(Photo.extension)
+            .order_by(Photo.extension)
+            .all()
+        )
+
+    return {
+        "total_photos": total_photos,
+        "total_size_bytes": total_size_bytes,
+        "file_type_counts": {
+            extension: count for extension, count in file_type_rows
+        },
+        "newest_modified_at": (
+            newest_modified_at.isoformat() if newest_modified_at else None
+        ),
+        "oldest_modified_at": (
+            oldest_modified_at.isoformat() if oldest_modified_at else None
+        ),
     }

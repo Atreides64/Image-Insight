@@ -52,6 +52,34 @@ Then open:
 - API health check: `http://127.0.0.1:8000/health`
 - Interactive API docs: `http://127.0.0.1:8000/docs`
 
+## Frontend Setup
+
+The React dashboard lives in `frontend/` and uses Vite.
+
+Install frontend dependencies:
+
+```bash
+cd frontend
+npm install
+```
+
+Run the frontend:
+
+```bash
+npm run dev
+```
+
+Then open:
+
+- Dashboard: `http://127.0.0.1:5173`
+
+By default, the frontend fetches the FastAPI backend at `http://127.0.0.1:8000`.
+To point it somewhere else, create `frontend/.env.local`:
+
+```bash
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
 ## Status
 
 In active development.
