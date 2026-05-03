@@ -71,6 +71,13 @@ def format_photo(photo: Photo) -> dict[str, object]:
     }
 
 
+def normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+
+    return value.astimezone(timezone.utc)
+
+
 def print_scan_counters(
     label: str,
     *,
@@ -114,7 +121,7 @@ def scan_folder(folder_path: str, include_files: bool = False) -> dict[str, obje
     failed_files = 0
 
     with SessionLocal() as session:
-        for path in sorted(folder.rglob("*")):
+        for path in folder.rglob("*"):
             if not path.is_file():
                 continue
 
@@ -140,12 +147,25 @@ def scan_folder(folder_path: str, include_files: bool = False) -> dict[str, obje
                 session.add(photo)
                 new_files += 1
             else:
-                photo.filename = metadata["filename"]
-                photo.extension = metadata["extension"]
-                photo.size_bytes = metadata["size_bytes"]
-                photo.modified_at = metadata["modified_at"]
-                photo.scanned_at = scanned_at
-                updated_files += 1
+                has_changes = any(
+                    (
+                        photo.filename != metadata["filename"],
+                        photo.extension != metadata["extension"],
+                        photo.size_bytes != metadata["size_bytes"],
+                        normalize_datetime(photo.modified_at)
+                        != normalize_datetime(metadata["modified_at"]),
+                    )
+                )
+
+                if has_changes:
+                    photo.filename = metadata["filename"]
+                    photo.extension = metadata["extension"]
+                    photo.size_bytes = metadata["size_bytes"]
+                    photo.modified_at = metadata["modified_at"]
+                    photo.scanned_at = scanned_at
+                    updated_files += 1
+                else:
+                    skipped_files += 1
 
             if include_files:
                 files.append(

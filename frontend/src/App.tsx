@@ -23,6 +23,7 @@ type ScanResult = {
   new_files: number;
   updated_files: number;
   skipped_files: number;
+  failed_files: number;
   elapsed_seconds: number;
   folder_path: string;
   files?: Array<Record<string, unknown>>;
@@ -116,8 +117,12 @@ function App() {
       }
 
       const result = (await response.json()) as ScanResult;
+      const failedFilesMessage =
+        result.failed_files > 0
+          ? ` ${result.failed_files.toLocaleString()} could not be read.`
+          : "";
       setScanMessage(
-        `Scan complete for ${result.folder_path}. ${result.total_files.toLocaleString()} files processed, ${result.new_files.toLocaleString()} new, ${result.updated_files.toLocaleString()} updated, ${result.skipped_files.toLocaleString()} skipped in ${result.elapsed_seconds.toFixed(2)}s.`,
+        `Scan complete for ${result.folder_path}. ${result.total_files.toLocaleString()} image files matched, ${result.new_files.toLocaleString()} new, ${result.updated_files.toLocaleString()} updated, ${result.skipped_files.toLocaleString()} skipped in ${result.elapsed_seconds.toFixed(2)}s.${failedFilesMessage}`,
       );
       await loadStats();
     } catch (caughtError) {

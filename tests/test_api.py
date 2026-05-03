@@ -82,8 +82,8 @@ def test_scan_folder_with_temporary_image_files(tmp_path: Path) -> None:
     assert data_with_files["files_seen"] == 4
     assert data_with_files["image_files_matched"] == 3
     assert data_with_files["new_files"] == 0
-    assert data_with_files["updated_files"] == 3
-    assert data_with_files["skipped_files"] == 1
+    assert data_with_files["updated_files"] == 0
+    assert data_with_files["skipped_files"] == 4
     assert data_with_files["failed_files"] == 0
     assert returned_paths == {str(path) for path in image_files}
 
@@ -95,3 +95,26 @@ def test_scan_folder_with_temporary_image_files(tmp_path: Path) -> None:
     assert stats["file_type_counts"]["jpg"] >= 1
     assert stats["file_type_counts"]["png"] >= 1
     assert stats["file_type_counts"]["raf"] >= 1
+
+
+def test_scan_folder_counts_changed_files_as_updated(tmp_path: Path) -> None:
+    image_file = tmp_path / "photo.jpg"
+    image_file.write_text("first version")
+
+    first_response = client.get("/scan-folder", params={"folder_path": str(tmp_path)})
+    first_data = first_response.json()
+
+    assert first_response.status_code == 200
+    assert first_data["new_files"] == 1
+    assert first_data["updated_files"] == 0
+    assert first_data["skipped_files"] == 0
+
+    image_file.write_text("second version with changes")
+
+    second_response = client.get("/scan-folder", params={"folder_path": str(tmp_path)})
+    second_data = second_response.json()
+
+    assert second_response.status_code == 200
+    assert second_data["new_files"] == 0
+    assert second_data["updated_files"] == 1
+    assert second_data["skipped_files"] == 0

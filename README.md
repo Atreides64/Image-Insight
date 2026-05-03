@@ -56,6 +56,10 @@ The backend creates a local SQLite database at the repo root as `image_insight.d
 `/scan-folder` returns a concise scan summary by default. To include the full
 file list in the response, pass `include_files=true`.
 
+Scans stream directly over `Path.rglob("*")`, commit database changes every 500
+matched image files, and treat unchanged existing rows as `skipped_files`
+instead of `updated_files`.
+
 Default `/scan-folder` summary fields:
 
 - `total_files`

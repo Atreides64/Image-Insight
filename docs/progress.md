@@ -1,13 +1,15 @@
 # Current Project State
 
-Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/photos`, and `/stats`. `/scan-folder` now returns a concise summary by default with `total_files`, `files_seen`, `image_files_matched`, `new_files`, `updated_files`, `skipped_files`, `failed_files`, `elapsed_seconds`, and `folder_path`, and only includes the full file list when `include_files=true`. Scans recursively find supported image files, upsert records into SQLite at the repo-root `image_insight.db`, commit writes every 500 matched image files, and print progress counters to the terminal during long runs. A lightweight pytest suite covers `/health`, `/stats`, and `/scan-folder` against a temporary SQLite database, tracked Python bytecode has been removed from git while `__pycache__/` remains ignored, and GitHub Actions runs backend tests plus a frontend build on push and pull request. The frontend TypeScript build now passes with modern Vite-compatible `bundler` resolution, and generated frontend build artifacts are no longer tracked. The React/Vite dashboard fetches `/stats`, shows summary cards, displays a Recharts file-type bar chart, and includes a scan form that calls `/scan-folder`, shows a long-running scan spinner/message, and refreshes stats when scanning completes.
+Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/photos`, and `/stats`. `/scan-folder` now returns a concise summary by default with `total_files`, `files_seen`, `image_files_matched`, `new_files`, `updated_files`, `skipped_files`, `failed_files`, `elapsed_seconds`, and `folder_path`, and only includes the full file list when `include_files=true`. Scans stream directly over the recursive folder walk, upsert records into SQLite at the repo-root `image_insight.db`, commit writes every 500 matched image files, and print progress counters to the terminal during long runs. Existing rows only count as `updated_files` when image metadata changed; unchanged rescans now count as `skipped_files`. A lightweight pytest suite covers `/health`, `/stats`, and `/scan-folder` against a temporary SQLite database, tracked Python bytecode has been removed from git while `__pycache__/` remains ignored, and GitHub Actions runs backend tests plus a frontend build on push and pull request. The frontend TypeScript build now passes with modern Vite-compatible `bundler` resolution, and generated frontend build artifacts are no longer tracked. The React/Vite dashboard fetches `/stats`, shows summary cards, displays a Recharts file-type bar chart, and includes a scan form that calls `/scan-folder`, shows a long-running scan spinner/message, includes non-alarming notice for read failures, and refreshes stats when scanning completes.
 
 # Files Changed This Session
 
 - Modified `app/main.py` to track scan counters, print richer scan progress with `print(..., flush=True)`, and commit database updates every 500 matched image files.
+- Modified `app/main.py` again to preserve streaming scan iteration and count unchanged rescans as skipped instead of updated.
 - Modified `app/database.py` to use a clear repo-root SQLite path by default while still supporting `IMAGE_INSIGHT_DATABASE_URL` for tests.
-- Modified `tests/test_api.py` to cover the new `/scan-folder` counter semantics.
+- Modified `tests/test_api.py` to cover the new `/scan-folder` counter semantics, including unchanged rescans and real updates.
 - Modified `frontend/src/App.tsx` to add the scan form, scan state, stats refresh, GB formatting, and Recharts chart.
+- Modified `frontend/src/App.tsx` again to include `failed_files` in the scan completion message.
 - Modified `frontend/src/styles.css` to support the dark dashboard, chart, scan form, and scan spinner state.
 - Modified frontend TypeScript config and dependency ranges so `npm run build` passes reliably.
 - Modified `README.md` with backend test instructions and scan response behavior.
@@ -25,6 +27,8 @@ Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/photos`, a
 - Use plain terminal prints for scan progress instead of the logging module.
 - Distinguish scan counters between all files seen, matched image files, created rows, updated rows, skipped non-image files, and failed image reads.
 - Commit scan database writes every 500 matched image files so long scans expose durable progress before the full run finishes.
+- Preserve true streaming scan behavior by iterating `Path.rglob("*")` directly instead of sorting the full tree first.
+- Count unchanged existing image rows as `skipped_files`; reserve `updated_files` for real metadata changes.
 - Keep the frontend as a single dashboard component for now.
 - Use Recharts for file type visualization.
 - Keep SQLite and automatic table creation for the early MVP.
@@ -38,7 +42,7 @@ Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/photos`, a
 # Known Issues / Risks
 
 - Local folder scanning from a browser-triggered request assumes the backend can access the same filesystem path.
-- `/scan-folder` is still a single request/response flow, so very large archives can still run into browser or proxy timeout limits even though commits now happen in batches.
+- `/scan-folder` is still a single request/response flow, so very large archives can still run into browser or proxy timeout limits even though commits now happen in batches and progress prints start immediately.
 - The frontend production bundle still triggers Vite's 500 kB chunk-size warning because the dashboard ships Recharts in a single main bundle.
 
 # Next Best Task
@@ -86,3 +90,4 @@ Open:
 - 2026-05-03: Added GitHub Actions CI for backend pytest and frontend Vite build on push and pull request.
 - 2026-05-03: Added agent/project documentation and captured current backend/frontend progress.
 - 2026-05-03: Improved `/scan-folder` scan semantics with explicit counters, repo-root SQLite visibility, and batch commits every 500 matched image files.
+- 2026-05-03: Preserved streaming scan iteration, counted unchanged rescans as skipped, and surfaced failed image reads in the dashboard scan summary.

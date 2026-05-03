@@ -39,6 +39,7 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - `/scan-folder` returns a concise summary by default and only includes the full `files` payload when `include_files=true`.
 - Scan progress is printed with `print(..., flush=True)` so terminal output appears during long scans.
 - Scan counters distinguish `files_seen`, `image_files_matched`, `new_files`, `updated_files`, `skipped_files`, and `failed_files`.
+- Existing rows only count as `updated_files` when file metadata actually changed; unchanged rescans count as `skipped_files`.
 - Long scans commit database writes every 500 matched image files so progress is visible before the full run completes.
 - The frontend fetches the backend from `VITE_API_BASE_URL`, defaulting to `http://127.0.0.1:8000`.
 - CORS is enabled for the Vite dev server on `localhost:5173` and `127.0.0.1:5173`.
