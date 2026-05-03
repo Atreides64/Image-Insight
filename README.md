@@ -39,6 +39,12 @@ Install backend dependencies:
 pip install -r requirements.txt
 ```
 
+For backend tests, install development dependencies:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 Run the API:
 
 ```bash
@@ -47,10 +53,19 @@ uvicorn app.main:app --reload
 
 The backend creates a local SQLite database at `image_insight.db` automatically.
 
+`/scan-folder` returns a concise scan summary by default. To include the full
+file list in the response, pass `include_files=true`.
+
 Then open:
 
 - API health check: `http://127.0.0.1:8000/health`
 - Interactive API docs: `http://127.0.0.1:8000/docs`
+
+Run backend tests:
+
+```bash
+pytest
+```
 
 ## Frontend Setup
 

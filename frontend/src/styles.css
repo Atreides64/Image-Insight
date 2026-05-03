@@ -78,6 +78,7 @@ h2 {
 
 .state-message,
 .error-panel,
+.scan-section,
 .stat-card,
 .chart-section,
 .table-section {
@@ -99,6 +100,91 @@ h2 {
   padding: 18px;
   color: #ffc5ce;
   background: #2a151c;
+}
+
+.scan-section {
+  border-radius: 8px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.scan-heading {
+  align-items: flex-start;
+}
+
+.scan-heading h2 {
+  margin-bottom: 6px;
+}
+
+.scan-form {
+  display: grid;
+  gap: 10px;
+  padding: 22px;
+}
+
+.scan-form label {
+  color: #a7b3c6;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.scan-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.scan-controls input {
+  min-width: 0;
+  border: 1px solid #314055;
+  border-radius: 8px;
+  padding: 13px 14px;
+  color: #edf5ff;
+  background: #0f1722;
+  outline: none;
+}
+
+.scan-controls input:focus {
+  border-color: #6fd3b8;
+  box-shadow: 0 0 0 3px rgba(111, 211, 184, 0.14);
+}
+
+.scan-controls input:disabled {
+  color: #7f8da1;
+}
+
+.scan-controls button {
+  min-width: 116px;
+  border: 0;
+  border-radius: 8px;
+  padding: 13px 18px;
+  color: #08111a;
+  background: #6fd3b8;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.scan-controls button:disabled {
+  color: #5d6b7f;
+  background: #273244;
+  cursor: not-allowed;
+}
+
+.scan-feedback {
+  margin: 0 22px 22px;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.scan-feedback.success {
+  color: #bfffea;
+  background: rgba(111, 211, 184, 0.12);
+}
+
+.scan-feedback.failure {
+  color: #ffc5ce;
+  background: rgba(126, 52, 68, 0.35);
 }
 
 .stats-grid {
@@ -213,6 +299,14 @@ td:first-child {
 
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  .scan-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .scan-controls button {
+    width: 100%;
   }
 
   th,

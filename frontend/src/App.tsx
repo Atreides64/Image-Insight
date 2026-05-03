@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import {
   Bar,
   BarChart,
@@ -15,6 +16,16 @@ type Stats = {
   file_type_counts: Record<string, number>;
   newest_modified_at: string | null;
   oldest_modified_at: string | null;
+};
+
+type ScanResult = {
+  total_files: number;
+  new_files: number;
+  updated_files: number;
+  skipped_files: number;
+  elapsed_seconds: number;
+  folder_path: string;
+  files?: Array<Record<string, unknown>>;
 };
 
 const API_BASE_URL =
@@ -43,30 +54,80 @@ function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [folderPath, setFolderPath] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/stats`);
+
+      if (!response.ok) {
+        throw new Error(`Stats request failed with ${response.status}`);
+      }
+
+      setStats(await response.json());
+      setError(null);
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error ? caughtError.message : "Unable to load stats",
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    async function loadStats() {
-      try {
-        const response = await fetch(`${API_BASE_URL}/stats`);
+    loadStats();
+  }, [loadStats]);
 
-        if (!response.ok) {
-          throw new Error(`Stats request failed with ${response.status}`);
-        }
+  async function handleScanSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-        setStats(await response.json());
-      } catch (caughtError) {
-        setError(
-          caughtError instanceof Error
-            ? caughtError.message
-            : "Unable to load stats",
-        );
-      } finally {
-        setIsLoading(false);
-      }
+    const trimmedPath = folderPath.trim();
+
+    if (!trimmedPath) {
+      setScanError("Enter a folder path to scan.");
+      setScanMessage(null);
+      return;
     }
 
-    loadStats();
-  }, []);
+    setIsScanning(true);
+    setScanError(null);
+    setScanMessage(null);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/scan-folder?folder_path=${encodeURIComponent(trimmedPath)}`,
+      );
+
+      if (!response.ok) {
+        let message = `Scan failed with ${response.status}`;
+
+        try {
+          const errorBody = await response.json();
+          message = errorBody.detail ?? message;
+        } catch {
+          // Keep the status-based message if the backend response is not JSON.
+        }
+
+        throw new Error(message);
+      }
+
+      const result = (await response.json()) as ScanResult;
+      setScanMessage(
+        `Scan complete for ${result.folder_path}. ${result.total_files.toLocaleString()} files processed, ${result.new_files.toLocaleString()} new, ${result.updated_files.toLocaleString()} updated, ${result.skipped_files.toLocaleString()} skipped in ${result.elapsed_seconds.toFixed(2)}s.`,
+      );
+      await loadStats();
+    } catch (caughtError) {
+      setScanError(
+        caughtError instanceof Error ? caughtError.message : "Unable to scan folder",
+      );
+    } finally {
+      setIsScanning(false);
+    }
+  }
 
   const fileTypeRows = useMemo(() => {
     if (!stats) {
@@ -105,6 +166,35 @@ function App() {
           <span>{error}</span>
         </div>
       )}
+
+      <section className="scan-section" aria-labelledby="scan-folder-heading">
+        <div className="section-heading scan-heading">
+          <div>
+            <h2 id="scan-folder-heading">Scan Folder</h2>
+            <span>Add local image files to the dashboard database</span>
+          </div>
+        </div>
+
+        <form className="scan-form" onSubmit={handleScanSubmit}>
+          <label htmlFor="folder-path">Local folder path</label>
+          <div className="scan-controls">
+            <input
+              id="folder-path"
+              type="text"
+              value={folderPath}
+              onChange={(event) => setFolderPath(event.target.value)}
+              placeholder="/Users/you/Pictures"
+              disabled={isScanning}
+            />
+            <button type="submit" disabled={isScanning}>
+              {isScanning ? "Scanning..." : "Scan"}
+            </button>
+          </div>
+        </form>
+
+        {scanMessage && <p className="scan-feedback success">{scanMessage}</p>}
+        {scanError && <p className="scan-feedback failure">{scanError}</p>}
+      </section>
 
       {stats && (
         <>

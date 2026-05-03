@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -70,8 +71,10 @@ def format_photo(photo: Photo) -> dict[str, object]:
 
 
 @app.get("/scan-folder")
-def scan_folder(folder_path: str) -> dict[str, object]:
+def scan_folder(folder_path: str, include_files: bool = False) -> dict[str, object]:
     folder = Path(folder_path).expanduser()
+    start_time = time.monotonic()
+    print(f"Scan started: {folder}", flush=True)
 
     if not folder.exists() or not folder.is_dir():
         raise HTTPException(
@@ -79,43 +82,76 @@ def scan_folder(folder_path: str) -> dict[str, object]:
             detail=f"Folder not found: {folder_path}",
         )
 
-    image_paths = sorted(
-        path
-        for path in folder.rglob("*")
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-    )
     scanned_at = datetime.now(timezone.utc)
     files = []
+    processed_count = 0
+    new_files = 0
+    updated_files = 0
+    skipped_files = 0
 
     with SessionLocal() as session:
-        for path in image_paths:
-            metadata = build_file_metadata(path)
+        for path in sorted(folder.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+
+            try:
+                metadata = build_file_metadata(path)
+            except OSError as error:
+                print(f"Could not read file {path}: {error}", flush=True)
+                skipped_files += 1
+                continue
+
+            processed_count += 1
+
+            if processed_count % 250 == 0:
+                print(f"Scan progress: {processed_count} files processed", flush=True)
+
             photo = session.query(Photo).filter(Photo.path == metadata["path"]).one_or_none()
 
             if photo is None:
                 photo = Photo(**metadata, scanned_at=scanned_at)
                 session.add(photo)
+                new_files += 1
             else:
                 photo.filename = metadata["filename"]
                 photo.extension = metadata["extension"]
                 photo.size_bytes = metadata["size_bytes"]
                 photo.modified_at = metadata["modified_at"]
                 photo.scanned_at = scanned_at
+                updated_files += 1
 
-            files.append(
-                {
-                    **metadata,
-                    "modified_at": metadata["modified_at"].isoformat(),
-                    "scanned_at": scanned_at.isoformat(),
-                }
-            )
+            if include_files:
+                files.append(
+                    {
+                        **metadata,
+                        "modified_at": metadata["modified_at"].isoformat(),
+                        "scanned_at": scanned_at.isoformat(),
+                    }
+                )
 
         session.commit()
 
-    return {
+    elapsed_time = time.monotonic() - start_time
+    print(
+        f"Scan complete: {processed_count} files processed in {elapsed_time:.2f} seconds",
+        flush=True,
+    )
+
+    response = {
         "total_files": len(files),
-        "files": files,
+        "new_files": new_files,
+        "updated_files": updated_files,
+        "skipped_files": skipped_files,
+        "elapsed_seconds": round(elapsed_time, 2),
+        "folder_path": str(folder),
     }
+
+    response["total_files"] = new_files + updated_files
+
+    if include_files:
+        response["files"] = files
+
+    return response
 
 
 @app.get("/photos")
