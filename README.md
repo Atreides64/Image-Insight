@@ -45,6 +45,8 @@ Run the API:
 uvicorn app.main:app --reload
 ```
 
+The backend creates a local SQLite database at `image_insight.db` automatically.
+
 Then open:
 
 - API health check: `http://127.0.0.1:8000/health`
