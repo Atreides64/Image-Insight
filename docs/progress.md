@@ -1,53 +1,35 @@
 # Current Project State
 
-Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/photos`, and `/stats`. `/scan-folder` now returns a concise summary by default with `total_files`, `files_seen`, `image_files_matched`, `new_files`, `updated_files`, `skipped_files`, `failed_files`, `elapsed_seconds`, and `folder_path`, and only includes the full file list when `include_files=true`. Scans stream directly over the recursive folder walk, upsert records into SQLite at the repo-root `image_insight.db`, commit writes every 500 matched image files, and print progress counters to the terminal during long runs. Existing rows only count as `updated_files` when image metadata changed; unchanged rescans now count as `skipped_files`. A lightweight pytest suite covers `/health`, `/stats`, and `/scan-folder` against a temporary SQLite database, tracked Python bytecode has been removed from git while `__pycache__/` remains ignored, and GitHub Actions runs backend tests plus a frontend build on push and pull request. The frontend TypeScript build now passes with modern Vite-compatible `bundler` resolution, and generated frontend build artifacts are no longer tracked. The React/Vite dashboard fetches `/stats`, shows summary cards, displays a Recharts file-type bar chart, and includes a scan form that calls `/scan-folder`, shows a long-running scan spinner/message, includes non-alarming notice for read failures, and refreshes stats when scanning completes.
+Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/scan-sessions`, `/scan-sessions/{scan_id}`, `/photos`, and `/stats`. `/scan-folder` still returns a concise summary by default, but now also creates durable scan session records in SQLite and supports `resume=true` for the latest failed or interrupted scan on the same folder. Resumed scans reuse the same `scan_id`, preserve committed session state, skip already committed file work when possible, and still count unchanged files as `skipped_files` rather than `updated_files`. Scans stream directly over the recursive folder walk, upsert records into SQLite at the repo-root `image_insight.db`, commit writes every 500 matched image files, and print progress counters to the terminal during long runs. A lightweight pytest suite now covers health, stats, scan session creation, completed scans, failed/interrupted resume flows, and unchanged-after-resume skip behavior against a temporary SQLite database. The React/Vite dashboard fetches `/stats`, shows summary cards, displays a Recharts file-type bar chart, includes a scan form that calls `/scan-folder`, shows the latest scan session state for the entered folder, and offers a calm resume action when the last scan did not complete cleanly.
 
 # Files Changed This Session
 
-- Modified `app/main.py` to track scan counters, print richer scan progress with `print(..., flush=True)`, and commit database updates every 500 matched image files.
-- Modified `app/main.py` again to preserve streaming scan iteration and count unchanged rescans as skipped instead of updated.
-- Modified `app/database.py` to use a clear repo-root SQLite path by default while still supporting `IMAGE_INSIGHT_DATABASE_URL` for tests.
-- Modified `tests/test_api.py` to cover the new `/scan-folder` counter semantics, including unchanged rescans and real updates.
-- Modified `frontend/src/App.tsx` to add the scan form, scan state, stats refresh, GB formatting, and Recharts chart.
-- Modified `frontend/src/App.tsx` again to include `failed_files` in the scan completion message.
-- Modified `frontend/src/styles.css` to support the dark dashboard, chart, scan form, and scan spinner state.
-- Modified frontend TypeScript config and dependency ranges so `npm run build` passes reliably.
-- Modified `README.md` with backend test instructions and scan response behavior.
-- Modified `AGENTS.md` and `docs/progress.md`.
-- Added `.github/workflows/ci.yml`.
-- Added `requirements-dev.txt`.
-- Added `tests/test_api.py`.
-- Deleted tracked `app/__pycache__/__init__.cpython-313.pyc`.
-- Deleted tracked `app/__pycache__/main.cpython-313.pyc`.
-- Deleted tracked frontend generated artifacts: `vite.config.js`, `vite.config.d.ts`, and root-level `.tsbuildinfo` files.
-- Added/updated frontend dependency metadata including `frontend/package-lock.json`.
+- Modified `app/main.py` to add durable scan session tracking, resume support, and `/scan-sessions` endpoints while keeping `/scan-folder` backward compatible.
+- Modified `app/models.py` to add `scan_sessions` and `scan_session_files` tables.
+- Modified `tests/test_api.py` to cover scan session creation, completed scans, failed/interrupted resume flows, and unchanged-after-resume skip behavior.
+- Modified `frontend/src/App.tsx` to show the latest scan session for the entered folder and offer a resume action when the last scan was interrupted or failed.
+- Modified `frontend/src/styles.css` to style the previous scan status panel and resume button.
+- Modified `README.md` and `docs/progress.md`.
 
 # Decisions Made
 
-- Use plain terminal prints for scan progress instead of the logging module.
-- Distinguish scan counters between all files seen, matched image files, created rows, updated rows, skipped non-image files, and failed image reads.
-- Commit scan database writes every 500 matched image files so long scans expose durable progress before the full run finishes.
-- Preserve true streaming scan behavior by iterating `Path.rglob("*")` directly instead of sorting the full tree first.
-- Count unchanged existing image rows as `skipped_files`; reserve `updated_files` for real metadata changes.
-- Keep the frontend as a single dashboard component for now.
-- Use Recharts for file type visualization.
-- Keep SQLite and automatic table creation for the early MVP.
-- Use the repo-root `image_insight.db` as the one clear local database path, with `IMAGE_INSIGHT_DATABASE_URL` reserved for tests.
-- Remove tracked bytecode from git and rely on `.gitignore` for regenerated local `.pyc` files.
-- Return concise scan summaries by default and keep full file payloads optional.
-- Use separate backend and frontend CI jobs so failures are isolated and caching stays simple.
-- Show clear long-running scan feedback in the frontend instead of leaving the form visually idle.
-- Pin frontend package ranges to stable semver versions taken from the current lockfile instead of `latest`.
+- Keep `/scan-folder` synchronous for now, but persist each scan as a durable session record with resumable states.
+- Reuse the same `scan_id` when resuming the latest failed or interrupted scan for a folder.
+- Track processed file paths per scan session so resumed scans can skip already committed file work.
+- Reset per-run counters when resuming, while preserving the session record and previous stop reason.
+- Keep batch commits at every 500 matched image files so both photo data and scan-session progress become visible during long scans.
+- Keep the frontend as a single dashboard component for now and surface resume controls inline with the scan form.
 
 # Known Issues / Risks
 
 - Local folder scanning from a browser-triggered request assumes the backend can access the same filesystem path.
-- `/scan-folder` is still a single request/response flow, so very large archives can still run into browser or proxy timeout limits even though commits now happen in batches and progress prints start immediately.
+- `/scan-folder` is still a single request/response flow, so very large archives can still run into browser or proxy timeout limits even though session progress is committed in batches and resume is available afterward.
+- Resume currently reuses the latest resumable session for a folder rather than supporting multiple parallel in-flight scans for the same path.
 - The frontend production bundle still triggers Vite's 500 kB chunk-size warning because the dashboard ships Recharts in a single main bundle.
 
 # Next Best Task
 
-Convert scan progress into a lightweight background job/status flow so the frontend can show live processed counts without holding one request open for the full archive scan.
+Convert scan session progress into a lightweight background job/status flow so the frontend can show live processed counts without holding one request open for the full archive scan.
 
 # Quick Start
 
@@ -91,3 +73,4 @@ Open:
 - 2026-05-03: Added agent/project documentation and captured current backend/frontend progress.
 - 2026-05-03: Improved `/scan-folder` scan semantics with explicit counters, repo-root SQLite visibility, and batch commits every 500 matched image files.
 - 2026-05-03: Preserved streaming scan iteration, counted unchanged rescans as skipped, and surfaced failed image reads in the dashboard scan summary.
+- 2026-05-03: Added resumable scan sessions, session inspection endpoints, and frontend resume controls for interrupted or failed scans.

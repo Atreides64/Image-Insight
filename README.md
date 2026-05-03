@@ -60,8 +60,13 @@ Scans stream directly over `Path.rglob("*")`, commit database changes every 500
 matched image files, and treat unchanged existing rows as `skipped_files`
 instead of `updated_files`.
 
+Use `resume=true` to resume the latest failed or interrupted scan session for
+the same folder without redoing already committed file work unnecessarily.
+
 Default `/scan-folder` summary fields:
 
+- `scan_id`
+- `status`
 - `total_files`
 - `files_seen`
 - `image_files_matched`
@@ -71,6 +76,12 @@ Default `/scan-folder` summary fields:
 - `failed_files`
 - `elapsed_seconds`
 - `folder_path`
+
+Scan session endpoints:
+
+- `GET /scan-sessions`
+- `GET /scan-sessions?folder_path=/path/to/folder`
+- `GET /scan-sessions/{scan_id}`
 
 Then open:
 

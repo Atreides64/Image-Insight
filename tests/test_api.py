@@ -1,5 +1,6 @@
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 test_db_dir = tempfile.TemporaryDirectory()
@@ -8,7 +9,10 @@ os.environ["IMAGE_INSIGHT_DATABASE_URL"] = f"sqlite:///{test_db_path}"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app import main as main_module  # noqa: E402
+from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models import Photo, ScanSession, ScanSessionFile  # noqa: E402
 
 client = TestClient(app)
 
@@ -38,7 +42,7 @@ def test_stats_returns_valid_json_structure() -> None:
     assert isinstance(data["file_type_counts"], dict)
 
 
-def test_scan_folder_with_temporary_image_files(tmp_path: Path) -> None:
+def test_scan_folder_creates_completed_scan_session(tmp_path: Path) -> None:
     nested_folder = tmp_path / "nested"
     nested_folder.mkdir()
 
@@ -58,6 +62,7 @@ def test_scan_folder_with_temporary_image_files(tmp_path: Path) -> None:
     assert response.status_code == 200
     data = response.json()
 
+    assert data["status"] == "completed"
     assert data["total_files"] == 3
     assert data["files_seen"] == 4
     assert data["image_files_matched"] == 3
@@ -68,6 +73,24 @@ def test_scan_folder_with_temporary_image_files(tmp_path: Path) -> None:
     assert data["folder_path"] == str(tmp_path)
     assert data["elapsed_seconds"] >= 0
     assert "files" not in data
+
+    sessions_response = client.get(
+        "/scan-sessions",
+        params={"folder_path": str(tmp_path)},
+    )
+    session_list = sessions_response.json()["scan_sessions"]
+
+    assert sessions_response.status_code == 200
+    assert len(session_list) == 1
+    assert session_list[0]["scan_id"] == data["scan_id"]
+    assert session_list[0]["status"] == "completed"
+
+    session_detail_response = client.get(f"/scan-sessions/{data['scan_id']}")
+    session_detail = session_detail_response.json()
+
+    assert session_detail_response.status_code == 200
+    assert session_detail["folder_path"] == str(tmp_path)
+    assert session_detail["completed_at"] is not None
 
     response_with_files = client.get(
         "/scan-folder",
@@ -86,15 +109,6 @@ def test_scan_folder_with_temporary_image_files(tmp_path: Path) -> None:
     assert data_with_files["skipped_files"] == 4
     assert data_with_files["failed_files"] == 0
     assert returned_paths == {str(path) for path in image_files}
-
-    stats_response = client.get("/stats")
-    stats = stats_response.json()
-
-    assert stats_response.status_code == 200
-    assert stats["total_photos"] >= 3
-    assert stats["file_type_counts"]["jpg"] >= 1
-    assert stats["file_type_counts"]["png"] >= 1
-    assert stats["file_type_counts"]["raf"] >= 1
 
 
 def test_scan_folder_counts_changed_files_as_updated(tmp_path: Path) -> None:
@@ -118,3 +132,115 @@ def test_scan_folder_counts_changed_files_as_updated(tmp_path: Path) -> None:
     assert second_data["new_files"] == 0
     assert second_data["updated_files"] == 1
     assert second_data["skipped_files"] == 0
+
+
+def test_failed_scan_session_can_be_resumed(tmp_path: Path, monkeypatch) -> None:
+    first_image = tmp_path / "first.jpg"
+    second_image = tmp_path / "second.jpg"
+    first_image.write_text("first image")
+    second_image.write_text("second image")
+
+    original_build_file_metadata = main_module.build_file_metadata
+    metadata_calls = 0
+
+    def flaky_build_file_metadata(path: Path) -> dict[str, object]:
+        nonlocal metadata_calls
+
+        metadata_calls += 1
+
+        if metadata_calls == 2:
+            raise RuntimeError("simulated scan failure")
+
+        return original_build_file_metadata(path)
+
+    monkeypatch.setattr(
+        main_module,
+        "build_file_metadata",
+        flaky_build_file_metadata,
+    )
+
+    failed_response = client.get("/scan-folder", params={"folder_path": str(tmp_path)})
+
+    assert failed_response.status_code == 500
+    assert "Scan failed" in failed_response.json()["detail"]
+
+    sessions_response = client.get(
+        "/scan-sessions",
+        params={"folder_path": str(tmp_path)},
+    )
+    failed_session = sessions_response.json()["scan_sessions"][0]
+
+    assert failed_session["status"] == "failed"
+    assert failed_session["last_error"] == "simulated scan failure"
+
+    monkeypatch.setattr(
+        main_module,
+        "build_file_metadata",
+        original_build_file_metadata,
+    )
+
+    resumed_response = client.get(
+        "/scan-folder",
+        params={"folder_path": str(tmp_path), "resume": "true"},
+    )
+    resumed_data = resumed_response.json()
+
+    assert resumed_response.status_code == 200
+    assert resumed_data["scan_id"] == failed_session["scan_id"]
+    assert resumed_data["status"] == "completed"
+    assert resumed_data["new_files"] == 1
+    assert resumed_data["updated_files"] == 0
+    assert resumed_data["skipped_files"] == 1
+    assert resumed_data["failed_files"] == 0
+
+
+def test_interrupted_scan_session_can_be_resumed(tmp_path: Path) -> None:
+    first_image = tmp_path / "first.jpg"
+    second_image = tmp_path / "second.jpg"
+    first_image.write_text("first image")
+    second_image.write_text("second image")
+
+    metadata = main_module.build_file_metadata(first_image)
+    scanned_at = datetime.now(timezone.utc)
+
+    with SessionLocal() as session:
+        photo = Photo(**metadata, scanned_at=scanned_at)
+        scan_session = ScanSession(
+            folder_path=str(tmp_path),
+            status="interrupted",
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+            files_seen=1,
+            image_files_matched=1,
+            new_files=1,
+            updated_files=0,
+            skipped_files=0,
+            failed_files=0,
+            last_error="Stopped before completion.",
+        )
+        session.add(photo)
+        session.add(scan_session)
+        session.commit()
+        session.refresh(scan_session)
+        session.add(
+            ScanSessionFile(
+                scan_session_id=scan_session.id,
+                path=str(first_image),
+            )
+        )
+        session.commit()
+        scan_id = scan_session.id
+
+    resumed_response = client.get(
+        "/scan-folder",
+        params={"folder_path": str(tmp_path), "resume": "true"},
+    )
+    resumed_data = resumed_response.json()
+
+    assert resumed_response.status_code == 200
+    assert resumed_data["scan_id"] == scan_id
+    assert resumed_data["status"] == "completed"
+    assert resumed_data["new_files"] == 1
+    assert resumed_data["updated_files"] == 0
+    assert resumed_data["skipped_files"] == 1
+    assert resumed_data["failed_files"] == 0

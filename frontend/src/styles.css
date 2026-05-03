@@ -188,6 +188,74 @@ h2 {
   background: rgba(111, 211, 184, 0.12);
 }
 
+.scan-history {
+  display: grid;
+  gap: 10px;
+  margin: 0 22px 22px;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  padding: 14px;
+  background: #101823;
+}
+
+.scan-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scan-history-meta,
+.scan-history-note {
+  margin: 0;
+  color: #a7b3c6;
+  line-height: 1.5;
+}
+
+.scan-history-note {
+  color: #d9f7ee;
+}
+
+.scan-status {
+  border: 1px solid #314055;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.scan-status.completed {
+  color: #bfffea;
+  background: rgba(111, 211, 184, 0.12);
+}
+
+.scan-status.failed,
+.scan-status.interrupted {
+  color: #ffd4dc;
+  background: rgba(126, 52, 68, 0.24);
+}
+
+.scan-status.running {
+  color: #d9f7ee;
+  background: rgba(111, 211, 184, 0.12);
+}
+
+.secondary-button {
+  justify-self: start;
+  border: 1px solid #314055;
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #edf5ff;
+  background: #151e2b;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.secondary-button:disabled {
+  color: #7f8da1;
+  cursor: not-allowed;
+}
+
 .spinner {
   width: 18px;
   height: 18px;
