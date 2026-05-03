@@ -10,6 +10,7 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - Database: SQLite, created locally as `image_insight.db`
 - Frontend: React, TypeScript, Vite, Recharts
 - Tooling: `pip` for backend dependencies, `pytest` for backend tests, `npm` for frontend dependencies
+- CI: GitHub Actions runs backend tests and frontend build on pushes and pull requests
 
 ## Coding Standards
 
@@ -38,6 +39,7 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - The frontend fetches the backend from `VITE_API_BASE_URL`, defaulting to `http://127.0.0.1:8000`.
 - CORS is enabled for the Vite dev server on `localhost:5173` and `127.0.0.1:5173`.
 - Tests set `IMAGE_INSIGHT_DATABASE_URL` before importing the app so they use a temporary SQLite database.
+- CI lives in `.github/workflows/ci.yml` with separate backend and frontend jobs for faster feedback.
 
 ## Common Run Commands
 

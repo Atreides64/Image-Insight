@@ -1,6 +1,6 @@
 # Current Project State
 
-Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/photos`, and `/stats`. `/scan-folder` now returns a concise summary by default with totals, counts, elapsed time, and folder path, and only includes the full file list when `include_files=true`. Scans recursively find supported image files, upsert records into SQLite, and print progress to the terminal. A lightweight pytest suite covers `/health`, `/stats`, and `/scan-folder` against a temporary SQLite database, and tracked Python bytecode has been removed from git while `__pycache__/` remains ignored. The React/Vite dashboard fetches `/stats`, shows summary cards, displays a Recharts file-type bar chart, and includes a scan form that calls `/scan-folder` then refreshes stats.
+Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/photos`, and `/stats`. `/scan-folder` returns a concise summary by default with totals, counts, elapsed time, and folder path, and only includes the full file list when `include_files=true`. Scans recursively find supported image files, upsert records into SQLite, and print progress to the terminal. A lightweight pytest suite covers `/health`, `/stats`, and `/scan-folder` against a temporary SQLite database, tracked Python bytecode has been removed from git while `__pycache__/` remains ignored, and GitHub Actions now runs backend tests plus a frontend build on push and pull request. The React/Vite dashboard fetches `/stats`, shows summary cards, displays a Recharts file-type bar chart, and includes a scan form that calls `/scan-folder` then refreshes stats.
 
 # Files Changed This Session
 
@@ -10,6 +10,7 @@ Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/photos`, a
 - Modified `frontend/src/styles.css` to support the dark dashboard, chart, and scan form.
 - Modified `README.md` with backend test instructions and scan response behavior.
 - Modified `AGENTS.md` and `docs/progress.md`.
+- Added `.github/workflows/ci.yml`.
 - Added `requirements-dev.txt`.
 - Added `tests/test_api.py`.
 - Deleted tracked `app/__pycache__/__init__.cpython-313.pyc`.
@@ -25,15 +26,16 @@ Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/photos`, a
 - Use `IMAGE_INSIGHT_DATABASE_URL` so tests can run without touching the local development database.
 - Remove tracked bytecode from git and rely on `.gitignore` for regenerated local `.pyc` files.
 - Return concise scan summaries by default and keep full file payloads optional.
+- Use separate backend and frontend CI jobs so failures are isolated and caching stays simple.
 
 # Known Issues / Risks
 
-- Frontend build has not been verified in this Codex environment because `npm` was not available on PATH during earlier checks.
+- The frontend build still has not been verified in this Codex environment because `npm` was not available on PATH during earlier checks, though CI now runs `npm run build`.
 - Local folder scanning from a browser-triggered request assumes the backend can access the same filesystem path.
 
 # Next Best Task
 
-Verify the frontend build in a normal Node/npm environment and address any TypeScript or bundling issues that show up.
+Push the branch and confirm the new GitHub Actions workflow passes for both backend and frontend jobs.
 
 # Quick Start
 
@@ -71,4 +73,5 @@ Open:
 - 2026-05-03: Removed tracked Python bytecode files from git and confirmed `.gitignore` keeps regenerated `__pycache__` files out of status.
 - 2026-05-03: Changed `/scan-folder` to return a concise summary by default and made the full file list optional via `include_files=true`.
 - 2026-05-03: Added backend pytest suite with temporary SQLite coverage for health, stats, and folder scanning.
+- 2026-05-03: Added GitHub Actions CI for backend pytest and frontend Vite build on push and pull request.
 - 2026-05-03: Added agent/project documentation and captured current backend/frontend progress.
