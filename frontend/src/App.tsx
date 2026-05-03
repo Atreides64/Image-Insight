@@ -192,6 +192,15 @@ function App() {
           </div>
         </form>
 
+        {isScanning && (
+          <div className="scan-progress" role="status" aria-live="polite">
+            <span className="spinner" aria-hidden="true" />
+            <span>
+              Scanning folder... this may take several minutes for large archives.
+            </span>
+          </div>
+        )}
+
         {scanMessage && <p className="scan-feedback success">{scanMessage}</p>}
         {scanError && <p className="scan-feedback failure">{scanError}</p>}
       </section>

@@ -177,6 +177,27 @@ h2 {
   padding: 12px 14px;
 }
 
+.scan-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 22px 22px;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #d9f7ee;
+  background: rgba(111, 211, 184, 0.12);
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 2px solid rgba(111, 211, 184, 0.25);
+  border-top-color: #6fd3b8;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
 .scan-feedback.success {
   color: #bfffea;
   background: rgba(111, 211, 184, 0.12);
@@ -279,6 +300,12 @@ td {
 
 td:first-child {
   font-weight: 700;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 860px) {
