@@ -59,9 +59,12 @@ def test_scan_folder_with_temporary_image_files(tmp_path: Path) -> None:
     data = response.json()
 
     assert data["total_files"] == 3
+    assert data["files_seen"] == 4
+    assert data["image_files_matched"] == 3
     assert data["new_files"] == 3
     assert data["updated_files"] == 0
-    assert data["skipped_files"] == 0
+    assert data["skipped_files"] == 1
+    assert data["failed_files"] == 0
     assert data["folder_path"] == str(tmp_path)
     assert data["elapsed_seconds"] >= 0
     assert "files" not in data
@@ -76,9 +79,12 @@ def test_scan_folder_with_temporary_image_files(tmp_path: Path) -> None:
     returned_paths = {file["path"] for file in data_with_files["files"]}
 
     assert data_with_files["total_files"] == 3
+    assert data_with_files["files_seen"] == 4
+    assert data_with_files["image_files_matched"] == 3
     assert data_with_files["new_files"] == 0
     assert data_with_files["updated_files"] == 3
-    assert data_with_files["skipped_files"] == 0
+    assert data_with_files["skipped_files"] == 1
+    assert data_with_files["failed_files"] == 0
     assert returned_paths == {str(path) for path in image_files}
 
     stats_response = client.get("/stats")

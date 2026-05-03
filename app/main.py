@@ -19,6 +19,7 @@ IMAGE_EXTENSIONS = {
     ".dng",
     ".raf",
 }
+BATCH_COMMIT_SIZE = 500
 
 app = FastAPI(
     title="Image Insight API",
@@ -70,6 +71,27 @@ def format_photo(photo: Photo) -> dict[str, object]:
     }
 
 
+def print_scan_counters(
+    label: str,
+    *,
+    files_seen: int,
+    image_files_matched: int,
+    new_files: int,
+    updated_files: int,
+    skipped_files: int,
+    failed_files: int,
+) -> None:
+    print(
+        (
+            f"{label}: files_seen={files_seen}, "
+            f"image_files_matched={image_files_matched}, "
+            f"new_files={new_files}, updated_files={updated_files}, "
+            f"skipped_files={skipped_files}, failed_files={failed_files}"
+        ),
+        flush=True,
+    )
+
+
 @app.get("/scan-folder")
 def scan_folder(folder_path: str, include_files: bool = False) -> dict[str, object]:
     folder = Path(folder_path).expanduser()
@@ -84,27 +106,32 @@ def scan_folder(folder_path: str, include_files: bool = False) -> dict[str, obje
 
     scanned_at = datetime.now(timezone.utc)
     files = []
-    processed_count = 0
+    files_seen = 0
+    image_files_matched = 0
     new_files = 0
     updated_files = 0
     skipped_files = 0
+    failed_files = 0
 
     with SessionLocal() as session:
         for path in sorted(folder.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
+            if not path.is_file():
                 continue
+
+            files_seen += 1
+
+            if path.suffix.lower() not in IMAGE_EXTENSIONS:
+                skipped_files += 1
+                continue
+
+            image_files_matched += 1
 
             try:
                 metadata = build_file_metadata(path)
             except OSError as error:
                 print(f"Could not read file {path}: {error}", flush=True)
-                skipped_files += 1
+                failed_files += 1
                 continue
-
-            processed_count += 1
-
-            if processed_count % 250 == 0:
-                print(f"Scan progress: {processed_count} files processed", flush=True)
 
             photo = session.query(Photo).filter(Photo.path == metadata["path"]).one_or_none()
 
@@ -129,24 +156,46 @@ def scan_folder(folder_path: str, include_files: bool = False) -> dict[str, obje
                     }
                 )
 
+            if image_files_matched % BATCH_COMMIT_SIZE == 0:
+                session.commit()
+                print_scan_counters(
+                    "Scan progress",
+                    files_seen=files_seen,
+                    image_files_matched=image_files_matched,
+                    new_files=new_files,
+                    updated_files=updated_files,
+                    skipped_files=skipped_files,
+                    failed_files=failed_files,
+                )
+
         session.commit()
 
     elapsed_time = time.monotonic() - start_time
+    print_scan_counters(
+        "Scan complete",
+        files_seen=files_seen,
+        image_files_matched=image_files_matched,
+        new_files=new_files,
+        updated_files=updated_files,
+        skipped_files=skipped_files,
+        failed_files=failed_files,
+    )
     print(
-        f"Scan complete: {processed_count} files processed in {elapsed_time:.2f} seconds",
+        f"Elapsed time: {elapsed_time:.2f} seconds",
         flush=True,
     )
 
     response = {
-        "total_files": len(files),
+        "total_files": image_files_matched,
+        "files_seen": files_seen,
+        "image_files_matched": image_files_matched,
         "new_files": new_files,
         "updated_files": updated_files,
         "skipped_files": skipped_files,
+        "failed_files": failed_files,
         "elapsed_seconds": round(elapsed_time, 2),
         "folder_path": str(folder),
     }
-
-    response["total_files"] = new_files + updated_files
 
     if include_files:
         response["files"] = files

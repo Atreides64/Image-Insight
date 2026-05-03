@@ -51,10 +51,22 @@ Run the API:
 uvicorn app.main:app --reload
 ```
 
-The backend creates a local SQLite database at `image_insight.db` automatically.
+The backend creates a local SQLite database at the repo root as `image_insight.db` automatically.
 
 `/scan-folder` returns a concise scan summary by default. To include the full
 file list in the response, pass `include_files=true`.
+
+Default `/scan-folder` summary fields:
+
+- `total_files`
+- `files_seen`
+- `image_files_matched`
+- `new_files`
+- `updated_files`
+- `skipped_files`
+- `failed_files`
+- `elapsed_seconds`
+- `folder_path`
 
 Then open:
 
