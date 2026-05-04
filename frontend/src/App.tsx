@@ -140,6 +140,7 @@ const API_BASE_URL =
 const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted", "cancelled"];
 const PHOTO_SEARCH_LIMIT = 25;
 const DASHBOARD_PREFERENCES_STORAGE_KEY = "image-insight-dashboard-preferences";
+const COMPACT_DASHBOARD_STORAGE_KEY = "image-insight-compact-dashboard";
 const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   showTotalPhotosCard: true,
   showTotalSizeCard: true,
@@ -280,6 +281,18 @@ function loadDashboardPreferences(): DashboardPreferences {
   }
 }
 
+function loadCompactDashboardPreference(): boolean {
+  try {
+    const storedPreference = window.localStorage.getItem(
+      COMPACT_DASHBOARD_STORAGE_KEY,
+    );
+
+    return storedPreference === null ? true : storedPreference === "true";
+  } catch {
+    return true;
+  }
+}
+
 function topLabel(rows: CountRow[]): string {
   return rows[0]?.label ?? "No data yet";
 }
@@ -362,6 +375,9 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [dashboardPreferences, setDashboardPreferences] =
     useState<DashboardPreferences>(loadDashboardPreferences);
+  const [isCompactDashboard, setIsCompactDashboard] = useState(
+    loadCompactDashboardPreference,
+  );
   const [folderPath, setFolderPath] = useState("");
   const [refreshMetadata, setRefreshMetadata] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -369,6 +385,7 @@ function App() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [lastScanSession, setLastScanSession] = useState<ScanSession | null>(null);
   const [scanHistory, setScanHistory] = useState<ScanSession[]>([]);
+  const [isScanHistoryExpanded, setIsScanHistoryExpanded] = useState(false);
   const [activeScanId, setActiveScanId] = useState<number | null>(null);
   const [activeScanStatus, setActiveScanStatus] = useState<ScanStatus | null>(null);
   const [photoSearchFilters, setPhotoSearchFilters] = useState<PhotoSearchFilters>({
@@ -515,6 +532,13 @@ function App() {
       JSON.stringify(dashboardPreferences),
     );
   }, [dashboardPreferences]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      COMPACT_DASHBOARD_STORAGE_KEY,
+      String(isCompactDashboard),
+    );
+  }, [isCompactDashboard]);
 
   useEffect(() => {
     void loadLatestScanSession(folderPath);
@@ -797,9 +821,10 @@ function App() {
 
   const canResumeScan = (scanSession: ScanSession) =>
     ["failed", "interrupted"].includes(scanSession.status);
+  const latestScanHistoryItem = scanHistory[0] ?? null;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${isCompactDashboard ? " compact-mode" : ""}`}>
       <section className="page-header">
         <div>
           <p className="eyebrow">Image Insight</p>
@@ -856,7 +881,19 @@ function App() {
       <section className="customize-section" aria-labelledby="customize-heading">
         <div className="section-heading">
           <h2 id="customize-heading">Customize Dashboard</h2>
-          <span>{visibleCardCount + visibleInsightCount} visible items</span>
+          <div className="section-actions">
+            <label className="compact-toggle">
+              <input
+                type="checkbox"
+                checked={isCompactDashboard}
+                onChange={(event) =>
+                  setIsCompactDashboard(event.target.checked)
+                }
+              />
+              Compact mode
+            </label>
+            <span>{visibleCardCount + visibleInsightCount} visible items</span>
+          </div>
         </div>
         <div className="customize-grid">
           <div className="customize-group">
@@ -1152,9 +1189,39 @@ function App() {
       <section className="table-section">
         <div className="section-heading">
           <h2>Scan History</h2>
-          <span>{scanHistory.length.toLocaleString()} recent scans</span>
+          <div className="section-actions">
+            <span>{scanHistory.length.toLocaleString()} recent scans</span>
+            <button
+              type="button"
+              className="small-action-button"
+              onClick={() =>
+                setIsScanHistoryExpanded((currentValue) => !currentValue)
+              }
+            >
+              {isScanHistoryExpanded ? "Collapse" : "Expand"}
+            </button>
+          </div>
         </div>
 
+        {!isScanHistoryExpanded && (
+          <div className="collapsed-summary">
+            {latestScanHistoryItem ? (
+              <>
+                <strong>{formatScanStatus(latestScanHistoryItem.status)}</strong>
+                <span>{latestScanHistoryItem.folder_path}</span>
+                <span>
+                  {latestScanHistoryItem.image_files_matched.toLocaleString()} matched,{" "}
+                  {latestScanHistoryItem.updated_files.toLocaleString()} updated,{" "}
+                  {latestScanHistoryItem.failed_files.toLocaleString()} failed
+                </span>
+              </>
+            ) : (
+              <span>No scan history yet. Start with a local photo folder above.</span>
+            )}
+          </div>
+        )}
+
+        {isScanHistoryExpanded && (
         <table>
           <thead>
             <tr>
@@ -1228,6 +1295,7 @@ function App() {
             )}
           </tbody>
         </table>
+        )}
       </section>
       )}
 
