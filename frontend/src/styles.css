@@ -165,6 +165,41 @@ h2 {
   overflow: hidden;
 }
 
+.system-info-panel {
+  border: 1px solid #273244;
+  border-radius: 8px;
+  margin-bottom: 18px;
+  overflow: hidden;
+  background: #101823;
+}
+
+.system-info-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 16px 22px 20px;
+}
+
+.system-info-grid div {
+  min-width: 0;
+}
+
+.system-info-grid dt {
+  margin-bottom: 6px;
+  color: #a7b3c6;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.system-info-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #edf5ff;
+  font-weight: 700;
+}
+
 .scan-heading {
   align-items: flex-start;
 }
@@ -192,6 +227,18 @@ h2 {
   font-size: 0.88rem;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.scan-form .scan-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  text-transform: none;
+}
+
+.scan-option input {
+  accent-color: #6fd3b8;
 }
 
 .search-form label {
@@ -275,6 +322,7 @@ h2 {
 .scan-progress {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   margin: 0 22px 22px;
   border-radius: 8px;
@@ -283,9 +331,17 @@ h2 {
   background: rgba(111, 211, 184, 0.12);
 }
 
+.scan-progress-detail {
+  border: 1px solid rgba(111, 211, 184, 0.3);
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .scan-live-panel {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 10px;
   margin: 0 22px 22px;
 }
@@ -354,7 +410,8 @@ h2 {
 }
 
 .scan-status.failed,
-.scan-status.interrupted {
+.scan-status.interrupted,
+.scan-status.cancelled {
   color: #ffd4dc;
   background: rgba(126, 52, 68, 0.24);
 }
@@ -549,6 +606,10 @@ td:first-child {
 }
 
 @media (max-width: 860px) {
+  .system-info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .customize-grid {
     grid-template-columns: 1fr;
   }
@@ -581,6 +642,10 @@ td:first-child {
   }
 
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .system-info-grid {
     grid-template-columns: 1fr;
   }
 

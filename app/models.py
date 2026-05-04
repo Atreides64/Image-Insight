@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -40,6 +40,7 @@ class ScanSession(Base):
     updated_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     skipped_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failed_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    force_metadata: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
