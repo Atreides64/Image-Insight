@@ -64,6 +64,7 @@ def test_stats_returns_valid_json_structure() -> None:
         "top_focal_lengths",
         "photos_by_year",
         "photos_by_month",
+        "photo_timeline",
         "busiest_date",
         "newest_modified_at",
         "oldest_modified_at",
@@ -76,6 +77,7 @@ def test_stats_returns_valid_json_structure() -> None:
     assert isinstance(data["top_focal_lengths"], list)
     assert isinstance(data["photos_by_year"], list)
     assert isinstance(data["photos_by_month"], list)
+    assert isinstance(data["photo_timeline"], list)
 
 
 def test_scan_folder_starts_background_job_and_status_completes(tmp_path: Path) -> None:
@@ -274,6 +276,12 @@ def test_scan_folder_extracts_exif_and_stats(tmp_path: Path) -> None:
     assert {"label": "50mm", "count": 1} in stats_data["top_focal_lengths"]
     assert {"label": "2024", "count": 1} in stats_data["photos_by_year"]
     assert {"label": "2024-07", "count": 1} in stats_data["photos_by_month"]
+    assert {
+        "label": "2024-07",
+        "count": 1,
+        "top_camera": "Canon EOS R5",
+        "top_lens": "RF50mm F1.8 STM",
+    } in stats_data["photo_timeline"]
     assert stats_data["busiest_date"] == {"label": "2024-07-14", "count": 1}
 
 

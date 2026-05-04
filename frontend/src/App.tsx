@@ -17,6 +17,11 @@ type CountRow = {
   count: number;
 };
 
+type TimelineInsightRow = CountRow & {
+  top_camera: string | null;
+  top_lens: string | null;
+};
+
 type Stats = {
   total_photos: number;
   total_size_bytes: number;
@@ -26,6 +31,7 @@ type Stats = {
   top_focal_lengths: CountRow[];
   photos_by_year: CountRow[];
   photos_by_month: CountRow[];
+  photo_timeline: TimelineInsightRow[];
   busiest_date: CountRow | null;
   newest_modified_at: string | null;
   oldest_modified_at: string | null;
@@ -59,9 +65,21 @@ type PhotoSearchFilters = {
 };
 
 type DashboardPreferences = {
-  showSummaryCards: boolean;
-  showExifCards: boolean;
-  showCharts: boolean;
+  showTotalPhotosCard: boolean;
+  showTotalSizeCard: boolean;
+  showNewestDateCard: boolean;
+  showOldestDateCard: boolean;
+  showFavoriteCameraCard: boolean;
+  showFavoriteLensCard: boolean;
+  showFocalLengthCard: boolean;
+  showBusiestDateCard: boolean;
+  showScanHistorySection: boolean;
+  showMetadataSearchSection: boolean;
+  showCameraChart: boolean;
+  showLensChart: boolean;
+  showTimelineChart: boolean;
+  showFileTypeChart: boolean;
+  showFileTypeTable: boolean;
 };
 
 type ScanStartResult = {
@@ -107,9 +125,21 @@ const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted"];
 const PHOTO_SEARCH_LIMIT = 25;
 const DASHBOARD_PREFERENCES_STORAGE_KEY = "image-insight-dashboard-preferences";
 const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
-  showSummaryCards: true,
-  showExifCards: true,
-  showCharts: true,
+  showTotalPhotosCard: true,
+  showTotalSizeCard: true,
+  showNewestDateCard: true,
+  showOldestDateCard: true,
+  showFavoriteCameraCard: true,
+  showFavoriteLensCard: true,
+  showFocalLengthCard: true,
+  showBusiestDateCard: true,
+  showScanHistorySection: true,
+  showMetadataSearchSection: true,
+  showCameraChart: true,
+  showLensChart: true,
+  showTimelineChart: true,
+  showFileTypeChart: true,
+  showFileTypeTable: true,
 };
 
 function formatBytes(bytes: number): string {
@@ -163,17 +193,71 @@ function loadDashboardPreferences(): DashboardPreferences {
       return DEFAULT_DASHBOARD_PREFERENCES;
     }
 
-    const parsedPreferences = JSON.parse(storedPreferences) as Partial<DashboardPreferences>;
+    const parsedPreferences = JSON.parse(storedPreferences) as
+      Partial<DashboardPreferences> & {
+        showSummaryCards?: boolean;
+        showExifCards?: boolean;
+        showCharts?: boolean;
+      };
 
     return {
-      showSummaryCards:
+      showTotalPhotosCard:
+        parsedPreferences.showTotalPhotosCard ??
         parsedPreferences.showSummaryCards ??
-        DEFAULT_DASHBOARD_PREFERENCES.showSummaryCards,
-      showExifCards:
+        DEFAULT_DASHBOARD_PREFERENCES.showTotalPhotosCard,
+      showTotalSizeCard:
+        parsedPreferences.showTotalSizeCard ??
+        parsedPreferences.showSummaryCards ??
+        DEFAULT_DASHBOARD_PREFERENCES.showTotalSizeCard,
+      showNewestDateCard:
+        parsedPreferences.showNewestDateCard ??
+        parsedPreferences.showSummaryCards ??
+        DEFAULT_DASHBOARD_PREFERENCES.showNewestDateCard,
+      showOldestDateCard:
+        parsedPreferences.showOldestDateCard ??
+        parsedPreferences.showSummaryCards ??
+        DEFAULT_DASHBOARD_PREFERENCES.showOldestDateCard,
+      showFavoriteCameraCard:
+        parsedPreferences.showFavoriteCameraCard ??
         parsedPreferences.showExifCards ??
-        DEFAULT_DASHBOARD_PREFERENCES.showExifCards,
-      showCharts:
-        parsedPreferences.showCharts ?? DEFAULT_DASHBOARD_PREFERENCES.showCharts,
+        DEFAULT_DASHBOARD_PREFERENCES.showFavoriteCameraCard,
+      showFavoriteLensCard:
+        parsedPreferences.showFavoriteLensCard ??
+        parsedPreferences.showExifCards ??
+        DEFAULT_DASHBOARD_PREFERENCES.showFavoriteLensCard,
+      showFocalLengthCard:
+        parsedPreferences.showFocalLengthCard ??
+        parsedPreferences.showExifCards ??
+        DEFAULT_DASHBOARD_PREFERENCES.showFocalLengthCard,
+      showBusiestDateCard:
+        parsedPreferences.showBusiestDateCard ??
+        parsedPreferences.showExifCards ??
+        DEFAULT_DASHBOARD_PREFERENCES.showBusiestDateCard,
+      showScanHistorySection:
+        parsedPreferences.showScanHistorySection ??
+        DEFAULT_DASHBOARD_PREFERENCES.showScanHistorySection,
+      showMetadataSearchSection:
+        parsedPreferences.showMetadataSearchSection ??
+        DEFAULT_DASHBOARD_PREFERENCES.showMetadataSearchSection,
+      showCameraChart:
+        parsedPreferences.showCameraChart ??
+        parsedPreferences.showCharts ??
+        DEFAULT_DASHBOARD_PREFERENCES.showCameraChart,
+      showLensChart:
+        parsedPreferences.showLensChart ??
+        parsedPreferences.showCharts ??
+        DEFAULT_DASHBOARD_PREFERENCES.showLensChart,
+      showTimelineChart:
+        parsedPreferences.showTimelineChart ??
+        parsedPreferences.showCharts ??
+        DEFAULT_DASHBOARD_PREFERENCES.showTimelineChart,
+      showFileTypeChart:
+        parsedPreferences.showFileTypeChart ??
+        parsedPreferences.showCharts ??
+        DEFAULT_DASHBOARD_PREFERENCES.showFileTypeChart,
+      showFileTypeTable:
+        parsedPreferences.showFileTypeTable ??
+        DEFAULT_DASHBOARD_PREFERENCES.showFileTypeTable,
     };
   } catch {
     return DEFAULT_DASHBOARD_PREFERENCES;
@@ -186,6 +270,29 @@ function topLabel(rows: CountRow[]): string {
 
 function topCount(rows: CountRow[]): string | null {
   return rows[0] ? `${rows[0].count.toLocaleString()} photos` : null;
+}
+
+function TimelineTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: TimelineInsightRow }>;
+}) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const row = payload[0].payload;
+
+  return (
+    <div className="chart-tooltip">
+      <strong>{row.label}</strong>
+      <span>{row.count.toLocaleString()} photos</span>
+      {row.top_camera && <span>Top camera: {row.top_camera}</span>}
+      {row.top_lens && <span>Top lens: {row.top_lens}</span>}
+    </div>
+  );
 }
 
 function formatScanStatus(status: string): string {
@@ -525,7 +632,40 @@ function App() {
   );
   const cameraChartData = stats?.top_cameras.slice(0, 8) ?? [];
   const lensChartData = stats?.top_lenses.slice(0, 8) ?? [];
-  const timelineChartData = stats?.photos_by_month ?? [];
+  const timelineChartData = stats?.photo_timeline ?? [];
+  const showAnyStatCard =
+    dashboardPreferences.showTotalPhotosCard ||
+    dashboardPreferences.showTotalSizeCard ||
+    dashboardPreferences.showNewestDateCard ||
+    dashboardPreferences.showOldestDateCard ||
+    dashboardPreferences.showFavoriteCameraCard ||
+    dashboardPreferences.showFavoriteLensCard ||
+    dashboardPreferences.showFocalLengthCard ||
+    dashboardPreferences.showBusiestDateCard;
+  const showAnyInsightChart =
+    dashboardPreferences.showCameraChart ||
+    dashboardPreferences.showLensChart ||
+    dashboardPreferences.showTimelineChart ||
+    dashboardPreferences.showFileTypeChart;
+  const visibleCardCount = [
+    dashboardPreferences.showTotalPhotosCard,
+    dashboardPreferences.showTotalSizeCard,
+    dashboardPreferences.showNewestDateCard,
+    dashboardPreferences.showOldestDateCard,
+    dashboardPreferences.showFavoriteCameraCard,
+    dashboardPreferences.showFavoriteLensCard,
+    dashboardPreferences.showFocalLengthCard,
+    dashboardPreferences.showBusiestDateCard,
+  ].filter(Boolean).length;
+  const visibleInsightCount = [
+    dashboardPreferences.showCameraChart,
+    dashboardPreferences.showLensChart,
+    dashboardPreferences.showTimelineChart,
+    dashboardPreferences.showFileTypeChart,
+    dashboardPreferences.showScanHistorySection,
+    dashboardPreferences.showMetadataSearchSection,
+    dashboardPreferences.showFileTypeTable,
+  ].filter(Boolean).length;
 
   const canResumeLastScan =
     lastScanSession !== null &&
@@ -556,33 +696,145 @@ function App() {
       <section className="customize-section" aria-labelledby="customize-heading">
         <div className="section-heading">
           <h2 id="customize-heading">Customize Dashboard</h2>
-          <span>Saved on this device</span>
+          <span>{visibleCardCount + visibleInsightCount} visible items</span>
         </div>
-        <div className="customize-controls">
-          <label>
-            <input
-              type="checkbox"
-              checked={dashboardPreferences.showSummaryCards}
-              onChange={() => updateDashboardPreference("showSummaryCards")}
-            />
-            Summary cards
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={dashboardPreferences.showExifCards}
-              onChange={() => updateDashboardPreference("showExifCards")}
-            />
-            EXIF cards
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={dashboardPreferences.showCharts}
-              onChange={() => updateDashboardPreference("showCharts")}
-            />
-            Charts
-          </label>
+        <div className="customize-grid">
+          <div className="customize-group">
+            <strong>Cards</strong>
+            <div className="customize-controls">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showTotalPhotosCard}
+                  onChange={() => updateDashboardPreference("showTotalPhotosCard")}
+                />
+                Total photos
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showTotalSizeCard}
+                  onChange={() => updateDashboardPreference("showTotalSizeCard")}
+                />
+                Total size
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showNewestDateCard}
+                  onChange={() => updateDashboardPreference("showNewestDateCard")}
+                />
+                Newest date
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showOldestDateCard}
+                  onChange={() => updateDashboardPreference("showOldestDateCard")}
+                />
+                Oldest date
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showFavoriteCameraCard}
+                  onChange={() =>
+                    updateDashboardPreference("showFavoriteCameraCard")
+                  }
+                />
+                Favorite camera
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showFavoriteLensCard}
+                  onChange={() => updateDashboardPreference("showFavoriteLensCard")}
+                />
+                Favorite lens
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showFocalLengthCard}
+                  onChange={() => updateDashboardPreference("showFocalLengthCard")}
+                />
+                Focal length
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showBusiestDateCard}
+                  onChange={() => updateDashboardPreference("showBusiestDateCard")}
+                />
+                Busiest date
+              </label>
+            </div>
+          </div>
+          <div className="customize-group">
+            <strong>Sections</strong>
+            <div className="customize-controls">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showCameraChart}
+                  onChange={() => updateDashboardPreference("showCameraChart")}
+                />
+                Camera chart
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showLensChart}
+                  onChange={() => updateDashboardPreference("showLensChart")}
+                />
+                Lens chart
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showTimelineChart}
+                  onChange={() => updateDashboardPreference("showTimelineChart")}
+                />
+                Timeline insight
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showFileTypeChart}
+                  onChange={() => updateDashboardPreference("showFileTypeChart")}
+                />
+                File type chart
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showScanHistorySection}
+                  onChange={() =>
+                    updateDashboardPreference("showScanHistorySection")
+                  }
+                />
+                Scan history
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showMetadataSearchSection}
+                  onChange={() =>
+                    updateDashboardPreference("showMetadataSearchSection")
+                  }
+                />
+                Metadata search
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dashboardPreferences.showFileTypeTable}
+                  onChange={() => updateDashboardPreference("showFileTypeTable")}
+                />
+                File type table
+              </label>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -688,6 +940,7 @@ function App() {
         {scanError && <p className="scan-feedback failure">{scanError}</p>}
       </section>
 
+      {dashboardPreferences.showScanHistorySection && (
       <section className="table-section">
         <div className="section-heading">
           <h2>Scan History</h2>
@@ -766,7 +1019,9 @@ function App() {
           </tbody>
         </table>
       </section>
+      )}
 
+      {dashboardPreferences.showMetadataSearchSection && (
       <section className="search-section" aria-labelledby="photo-search-heading">
         <div className="section-heading scan-heading">
           <div>
@@ -890,75 +1145,82 @@ function App() {
           </div>
         )}
       </section>
+      )}
 
       {stats && (
         <>
-          {(dashboardPreferences.showSummaryCards ||
-            dashboardPreferences.showExifCards) && (
+          {showAnyStatCard && (
             <section className="stats-grid" aria-label="Photo library stats">
-              {dashboardPreferences.showSummaryCards && (
-                <>
-                  <article className="stat-card">
-                    <span>Total Photos</span>
-                    <strong>{stats.total_photos.toLocaleString()}</strong>
-                  </article>
-                  <article className="stat-card">
-                    <span>Total Size</span>
-                    <strong>{formatGigabytes(stats.total_size_bytes)}</strong>
-                    <small>{formatBytes(stats.total_size_bytes)} bytes</small>
-                  </article>
-                  <article className="stat-card">
-                    <span>Newest Date</span>
-                    <strong>{formatDate(stats.newest_modified_at)}</strong>
-                  </article>
-                  <article className="stat-card">
-                    <span>Oldest Date</span>
-                    <strong>{formatDate(stats.oldest_modified_at)}</strong>
-                  </article>
-                </>
+              {dashboardPreferences.showTotalPhotosCard && (
+                <article className="stat-card">
+                  <span>Total Photos</span>
+                  <strong>{stats.total_photos.toLocaleString()}</strong>
+                </article>
               )}
-              {dashboardPreferences.showExifCards && (
-                <>
-                  <article className="stat-card">
-                    <span>Favorite Camera</span>
-                    <strong>{topLabel(stats.top_cameras)}</strong>
-                    {topCount(stats.top_cameras) && (
-                      <small>{topCount(stats.top_cameras)}</small>
-                    )}
-                  </article>
-                  <article className="stat-card">
-                    <span>Favorite Lens</span>
-                    <strong>{topLabel(stats.top_lenses)}</strong>
-                    {topCount(stats.top_lenses) && (
-                      <small>{topCount(stats.top_lenses)}</small>
-                    )}
-                  </article>
-                  <article className="stat-card">
-                    <span>Most Used Focal Length</span>
-                    <strong>{topLabel(stats.top_focal_lengths)}</strong>
-                    {topCount(stats.top_focal_lengths) && (
-                      <small>{topCount(stats.top_focal_lengths)}</small>
-                    )}
-                  </article>
-                  <article className="stat-card">
-                    <span>Busiest Date</span>
-                    <strong>
-                      {formatCalendarDate(stats.busiest_date?.label ?? null)}
-                    </strong>
-                    {stats.busiest_date && (
-                      <small>
-                        {stats.busiest_date.count.toLocaleString()} photos
-                      </small>
-                    )}
-                  </article>
-                </>
+              {dashboardPreferences.showTotalSizeCard && (
+                <article className="stat-card">
+                  <span>Total Size</span>
+                  <strong>{formatGigabytes(stats.total_size_bytes)}</strong>
+                  <small>{formatBytes(stats.total_size_bytes)} bytes</small>
+                </article>
+              )}
+              {dashboardPreferences.showNewestDateCard && (
+                <article className="stat-card">
+                  <span>Newest Date</span>
+                  <strong>{formatDate(stats.newest_modified_at)}</strong>
+                </article>
+              )}
+              {dashboardPreferences.showOldestDateCard && (
+                <article className="stat-card">
+                  <span>Oldest Date</span>
+                  <strong>{formatDate(stats.oldest_modified_at)}</strong>
+                </article>
+              )}
+              {dashboardPreferences.showFavoriteCameraCard && (
+                <article className="stat-card">
+                  <span>Favorite Camera</span>
+                  <strong>{topLabel(stats.top_cameras)}</strong>
+                  {topCount(stats.top_cameras) && (
+                    <small>{topCount(stats.top_cameras)}</small>
+                  )}
+                </article>
+              )}
+              {dashboardPreferences.showFavoriteLensCard && (
+                <article className="stat-card">
+                  <span>Favorite Lens</span>
+                  <strong>{topLabel(stats.top_lenses)}</strong>
+                  {topCount(stats.top_lenses) && (
+                    <small>{topCount(stats.top_lenses)}</small>
+                  )}
+                </article>
+              )}
+              {dashboardPreferences.showFocalLengthCard && (
+                <article className="stat-card">
+                  <span>Most Used Focal Length</span>
+                  <strong>{topLabel(stats.top_focal_lengths)}</strong>
+                  {topCount(stats.top_focal_lengths) && (
+                    <small>{topCount(stats.top_focal_lengths)}</small>
+                  )}
+                </article>
+              )}
+              {dashboardPreferences.showBusiestDateCard && (
+                <article className="stat-card">
+                  <span>Busiest Date</span>
+                  <strong>{formatCalendarDate(stats.busiest_date?.label ?? null)}</strong>
+                  {stats.busiest_date && (
+                    <small>{stats.busiest_date.count.toLocaleString()} photos</small>
+                  )}
+                </article>
               )}
             </section>
           )}
 
-          {dashboardPreferences.showCharts && (
+          {showAnyInsightChart && (
             <>
+              {(dashboardPreferences.showCameraChart ||
+                dashboardPreferences.showLensChart) && (
               <div className="chart-grid">
+                {dashboardPreferences.showCameraChart && (
                 <section className="chart-section">
                   <div className="section-heading">
                     <h2>Camera Usage</h2>
@@ -981,7 +1243,9 @@ function App() {
                     <p className="empty-chart">Run a scan with EXIF data to populate camera usage.</p>
                   )}
                 </section>
+                )}
 
+                {dashboardPreferences.showLensChart && (
                 <section className="chart-section">
                   <div className="section-heading">
                     <h2>Lens Usage</h2>
@@ -1004,11 +1268,14 @@ function App() {
                     <p className="empty-chart">Run a scan with EXIF data to populate lens usage.</p>
                   )}
                 </section>
+                )}
               </div>
+              )}
 
+              {dashboardPreferences.showTimelineChart && (
               <section className="chart-section">
                 <div className="section-heading">
-                  <h2>Timeline</h2>
+                  <h2>Photo Timeline</h2>
                   <span>{timelineChartData.length} months</span>
                 </div>
 
@@ -1019,7 +1286,7 @@ function App() {
                         <CartesianGrid stroke="#273244" vertical={false} />
                         <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
                         <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                        <Tooltip contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                        <Tooltip content={<TimelineTooltip />} />
                         <Line type="monotone" dataKey="count" stroke="#f0c66a" strokeWidth={3} dot={{ r: 3 }} />
                       </LineChart>
                     </ResponsiveContainer>
@@ -1028,7 +1295,9 @@ function App() {
                   <p className="empty-chart">Run a scan with capture dates to populate the timeline.</p>
                 )}
               </section>
+              )}
 
+              {dashboardPreferences.showFileTypeChart && (
               <section className="chart-section">
                 <div className="section-heading">
                   <h2>File Type Distribution</h2>
@@ -1051,9 +1320,11 @@ function App() {
                   <p className="empty-chart">Run a scan to populate file type data.</p>
                 )}
               </section>
+              )}
             </>
           )}
 
+          {dashboardPreferences.showFileTypeTable && (
           <section className="table-section">
             <div className="section-heading">
               <h2>File Type Counts</h2>
@@ -1083,6 +1354,7 @@ function App() {
               </tbody>
             </table>
           </section>
+          )}
         </>
       )}
     </main>

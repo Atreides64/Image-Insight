@@ -46,6 +46,7 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - Long scans commit database writes every 500 matched image files so progress is visible before the full run completes.
 - Starting a duplicate running scan for the same folder returns a conflict unless `resume=true` is attaching to the existing running session.
 - The frontend fetches the backend from `VITE_API_BASE_URL`, defaulting to `http://127.0.0.1:8000`.
+- `/stats.photo_timeline` provides the dashboard's monthly date-taken insight series with photo counts plus top camera/lens labels for tooltips.
 - CORS is enabled for the Vite dev server on `localhost:5173` and `127.0.0.1:5173`.
 - Tests set `IMAGE_INSIGHT_DATABASE_URL` before importing the app so they use a temporary SQLite database.
 - Pytest uses repo-root imports via `pytest.ini` with `pythonpath = .`; CI also sets `PYTHONPATH=.` for the backend job.
