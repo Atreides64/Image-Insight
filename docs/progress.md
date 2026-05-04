@@ -33,7 +33,6 @@ Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/scan-sessi
 - Resume currently reuses the latest resumable session for a folder rather than supporting multiple parallel in-flight scans for the same path.
 - The frontend production bundle still triggers Vite's 500 kB chunk-size warning because the dashboard ships Recharts in a single main bundle.
 - EXIF capture dates are interpreted as UTC when the image does not provide timezone data.
-- The failed sandboxed pytest attempt left permission-locked `pytest-cache-files-*` scratch directories in the working tree; they are now ignored by git, but may need manual deletion outside the sandbox if desired.
 
 # Next Best Task
 
@@ -83,3 +82,4 @@ Open:
 - 2026-05-03: Preserved streaming scan iteration, counted unchanged rescans as skipped, and surfaced failed image reads in the dashboard scan summary.
 - 2026-05-03: Added resumable scan sessions, session inspection endpoints, and frontend resume controls for interrupted or failed scans.
 - 2026-05-04: Added v0.2.0 EXIF analytics with camera/lens/focal length metadata, capture timeline stats, dashboard insight cards, and camera/lens/timeline charts.
+- 2026-05-04: Updated backend CI to install Ubuntu JPEG/zlib development libraries before Python dependencies so Pillow can build when wheels are unavailable.
