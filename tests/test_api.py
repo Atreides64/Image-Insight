@@ -327,9 +327,21 @@ def test_search_photos_rejects_invalid_ranges() -> None:
         "/photos/search",
         params={"date_from": "2024-02-01", "date_to": "2024-01-01"},
     )
+    invalid_date_response = client.get(
+        "/photos/search",
+        params={"date_from": "not-a-date"},
+    )
+    over_limit_response = client.get(
+        "/photos/search",
+        params={"limit": 500},
+    )
 
     assert focal_response.status_code == 400
     assert date_response.status_code == 400
+    assert invalid_date_response.status_code == 400
+    assert invalid_date_response.json()["detail"] == "Invalid date value: not-a-date"
+    assert over_limit_response.status_code == 400
+    assert over_limit_response.json()["detail"] == "limit must be between 1 and 100"
 
 
 def test_failed_scan_session_can_be_resumed(tmp_path: Path, monkeypatch) -> None:
