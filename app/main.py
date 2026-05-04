@@ -907,6 +907,19 @@ def get_stats() -> dict[str, object]:
             .order_by(func.count(Photo.id).desc(), "date")
             .first()
         )
+        timeline_detail_rows = (
+            session.query(
+                func.strftime("%Y-%m", Photo.date_taken).label("month"),
+                Photo.camera_make,
+                Photo.camera_model,
+                Photo.lens_model,
+                func.count(Photo.id),
+            )
+            .filter(Photo.date_taken.is_not(None))
+            .group_by("month", Photo.camera_make, Photo.camera_model, Photo.lens_model)
+            .order_by("month")
+            .all()
+        )
 
     camera_counts = Counter(
         " ".join(part for part in (make, model) if part)
@@ -922,6 +935,50 @@ def get_stats() -> dict[str, object]:
         for value, count in focal_length_rows
         if format_focal_length(value)
     ]
+    timeline_buckets: dict[str, dict[str, object]] = {}
+    for month, camera_make, camera_model, lens_model, count in timeline_detail_rows:
+        bucket = timeline_buckets.setdefault(
+            month,
+            {
+                "label": month,
+                "count": 0,
+                "camera_counts": Counter(),
+                "lens_counts": Counter(),
+            },
+        )
+        bucket["count"] = int(bucket["count"]) + count
+
+        camera_label = " ".join(
+            part for part in (camera_make, camera_model) if part
+        )
+        if camera_label:
+            bucket["camera_counts"][camera_label] += count
+        if lens_model:
+            bucket["lens_counts"][lens_model] += count
+
+    photo_timeline = []
+    for month in sorted(timeline_buckets):
+        bucket = timeline_buckets[month]
+        camera_counts_for_month = bucket["camera_counts"]
+        lens_counts_for_month = bucket["lens_counts"]
+        top_camera = (
+            camera_counts_for_month.most_common(1)[0][0]
+            if camera_counts_for_month
+            else None
+        )
+        top_lens = (
+            lens_counts_for_month.most_common(1)[0][0]
+            if lens_counts_for_month
+            else None
+        )
+        photo_timeline.append(
+            {
+                "label": bucket["label"],
+                "count": bucket["count"],
+                "top_camera": top_camera,
+                "top_lens": top_lens,
+            }
+        )
 
     return {
         "total_photos": total_photos,
@@ -934,6 +991,7 @@ def get_stats() -> dict[str, object]:
         "top_focal_lengths": top_focal_lengths,
         "photos_by_year": format_count_rows(year_rows),
         "photos_by_month": format_count_rows(month_rows),
+        "photo_timeline": photo_timeline,
         "busiest_date": (
             {"label": busiest_date_row[0], "count": busiest_date_row[1]}
             if busiest_date_row

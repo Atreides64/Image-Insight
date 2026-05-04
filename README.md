@@ -179,10 +179,11 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 The dashboard includes a local "Customize Dashboard" panel. Users can toggle
-summary cards, EXIF cards, and charts, and those preferences are saved in
-browser `localStorage` on that device.
+individual cards, charts, search/history sections, and the file type table, and
+those preferences are saved in browser `localStorage` on that device.
 
 ## Status
 
-v0.6.0 adds local dashboard customization controls. Duplicates, maps, and
-external job services remain future work.
+v0.7.0 tightens the dashboard layout, adds per-card and per-section
+customization, and adds a richer photo timeline insight chart. Duplicates, maps,
+open-in-folder, previews, and external job services remain future work.

@@ -110,11 +110,28 @@ h2 {
   overflow: hidden;
 }
 
+.customize-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 18px 22px;
+}
+
+.customize-group {
+  display: grid;
+  gap: 10px;
+}
+
+.customize-group strong {
+  color: #edf5ff;
+  font-size: 0.86rem;
+  text-transform: uppercase;
+}
+
 .customize-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 18px 22px;
+  gap: 8px;
 }
 
 .customize-controls label {
@@ -123,9 +140,10 @@ h2 {
   gap: 8px;
   border: 1px solid #273244;
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   color: #d5dfed;
   background: #101823;
+  font-size: 0.86rem;
   font-weight: 700;
 }
 
@@ -406,21 +424,21 @@ h2 {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
 }
 
 .stat-card {
-  min-height: 140px;
+  min-height: 106px;
   border-radius: 8px;
-  padding: 22px;
+  padding: 16px;
 }
 
 .stat-card span {
   display: block;
-  margin-bottom: 18px;
+  margin-bottom: 12px;
   color: #a7b3c6;
-  font-size: 0.88rem;
+  font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -428,7 +446,7 @@ h2 {
 .stat-card strong {
   display: block;
   overflow-wrap: anywhere;
-  font-size: clamp(1.4rem, 3vw, 2rem);
+  font-size: clamp(1.1rem, 2vw, 1.45rem);
   line-height: 1.15;
 }
 
@@ -438,6 +456,22 @@ h2 {
   color: #7f8da1;
   font-size: 0.9rem;
   overflow-wrap: anywhere;
+}
+
+.chart-tooltip {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #2f3d52;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #edf5ff;
+  background: #121a26;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+}
+
+.chart-tooltip span {
+  color: #a7b3c6;
+  font-size: 0.88rem;
 }
 
 .chart-section,
@@ -515,6 +549,10 @@ td:first-child {
 }
 
 @media (max-width: 860px) {
+  .customize-grid {
+    grid-template-columns: 1fr;
+  }
+
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
