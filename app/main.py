@@ -1,10 +1,12 @@
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func
+from PIL import ExifTags, Image, UnidentifiedImageError
+from sqlalchemy import func, text
 
 from app.database import Base, SessionLocal, engine
 from app.models import Photo, ScanSession, ScanSessionFile
@@ -25,7 +27,7 @@ RESUMABLE_SCAN_STATUSES = {"running", "interrupted", "failed"}
 app = FastAPI(
     title="Image Insight API",
     description="Backend API for local-first media metadata analytics.",
-    version="0.1.0",
+    version="0.2.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -40,9 +42,139 @@ app.add_middleware(
 Base.metadata.create_all(bind=engine)
 
 
+EXIF_COLUMNS = {
+    "camera_make": "VARCHAR",
+    "camera_model": "VARCHAR",
+    "lens_model": "VARCHAR",
+    "focal_length": "FLOAT",
+    "iso": "INTEGER",
+    "aperture": "FLOAT",
+    "shutter_speed": "VARCHAR",
+    "date_taken": "DATETIME",
+}
+EXIF_TAGS = {value: key for key, value in ExifTags.TAGS.items()}
+
+
+def ensure_photo_exif_columns() -> None:
+    with engine.begin() as connection:
+        existing_columns = {
+            row[1] for row in connection.execute(text("PRAGMA table_info(photos)"))
+        }
+
+        for column_name, column_type in EXIF_COLUMNS.items():
+            if column_name not in existing_columns:
+                connection.execute(
+                    text(f"ALTER TABLE photos ADD COLUMN {column_name} {column_type}")
+                )
+
+
+ensure_photo_exif_columns()
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def clean_exif_text(value: object) -> str | None:
+    if value is None:
+        return None
+
+    cleaned = str(value).strip().strip("\x00")
+    return cleaned or None
+
+
+def rational_to_float(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+    return round(number, 2)
+
+
+def format_shutter_speed(value: object) -> str | None:
+    speed = rational_to_float(value)
+
+    if speed is None or speed <= 0:
+        return None
+
+    if speed < 1:
+        denominator = round(1 / speed)
+        return f"1/{denominator}s"
+
+    return f"{speed:g}s"
+
+
+def parse_exif_datetime(value: object) -> datetime | None:
+    text_value = clean_exif_text(value)
+
+    if not text_value:
+        return None
+
+    for date_format in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text_value, date_format).replace(
+                tzinfo=timezone.utc
+            )
+        except ValueError:
+            continue
+
+    return None
+
+
+def exif_value(exif, tag_name: str) -> object:
+    tag_id = EXIF_TAGS.get(tag_name)
+
+    if tag_id is None:
+        return None
+
+    return exif.get(tag_id)
+
+
+def extract_exif_metadata(path: Path) -> dict[str, object]:
+    empty_metadata = {
+        "camera_make": None,
+        "camera_model": None,
+        "lens_model": None,
+        "focal_length": None,
+        "iso": None,
+        "aperture": None,
+        "shutter_speed": None,
+        "date_taken": None,
+    }
+
+    try:
+        with Image.open(path) as image:
+            exif = image.getexif()
+    except (OSError, UnidentifiedImageError, ValueError):
+        return empty_metadata
+
+    if not exif:
+        return empty_metadata
+
+    iso = exif_value(exif, "ISOSpeedRatings") or exif_value(
+        exif,
+        "PhotographicSensitivity",
+    )
+
+    try:
+        iso_value = int(iso) if iso is not None else None
+    except (TypeError, ValueError):
+        iso_value = None
+
+    return {
+        "camera_make": clean_exif_text(exif_value(exif, "Make")),
+        "camera_model": clean_exif_text(exif_value(exif, "Model")),
+        "lens_model": clean_exif_text(exif_value(exif, "LensModel")),
+        "focal_length": rational_to_float(exif_value(exif, "FocalLength")),
+        "iso": iso_value,
+        "aperture": rational_to_float(exif_value(exif, "FNumber")),
+        "shutter_speed": format_shutter_speed(exif_value(exif, "ExposureTime")),
+        "date_taken": parse_exif_datetime(
+            exif_value(exif, "DateTimeOriginal") or exif_value(exif, "DateTime")
+        ),
+    }
 
 
 def build_file_metadata(path: Path) -> dict[str, object]:
@@ -57,6 +189,7 @@ def build_file_metadata(path: Path) -> dict[str, object]:
             file_stat.st_mtime,
             tz=timezone.utc,
         ),
+        **extract_exif_metadata(path),
     }
 
 
@@ -69,7 +202,36 @@ def format_photo(photo: Photo) -> dict[str, object]:
         "size_bytes": photo.size_bytes,
         "modified_at": photo.modified_at.isoformat(),
         "scanned_at": photo.scanned_at.isoformat(),
+        "camera_make": photo.camera_make,
+        "camera_model": photo.camera_model,
+        "lens_model": photo.lens_model,
+        "focal_length": photo.focal_length,
+        "iso": photo.iso,
+        "aperture": photo.aperture,
+        "shutter_speed": photo.shutter_speed,
+        "date_taken": photo.date_taken.isoformat() if photo.date_taken else None,
     }
+
+
+def format_count_rows(rows: list[tuple[object, int]]) -> list[dict[str, object]]:
+    return [
+        {
+            "label": str(label),
+            "count": count,
+        }
+        for label, count in rows
+        if label
+    ]
+
+
+def format_focal_length(value: float | None) -> str | None:
+    if value is None:
+        return None
+
+    if float(value).is_integer():
+        return f"{int(value)}mm"
+
+    return f"{value:g}mm"
 
 
 def format_scan_session(scan_session: ScanSession) -> dict[str, object]:
@@ -98,6 +260,74 @@ def normalize_datetime(value: datetime) -> datetime:
         return value.replace(tzinfo=timezone.utc)
 
     return value.astimezone(timezone.utc)
+
+
+def metadata_values_changed(photo: Photo, metadata: dict[str, object]) -> bool:
+    date_taken = metadata["date_taken"]
+    stored_date_taken = photo.date_taken
+
+    if isinstance(date_taken, datetime) and stored_date_taken is not None:
+        date_taken_changed = normalize_datetime(stored_date_taken) != normalize_datetime(
+            date_taken
+        )
+    else:
+        date_taken_changed = stored_date_taken != date_taken
+
+    return any(
+        (
+            photo.filename != metadata["filename"],
+            photo.extension != metadata["extension"],
+            photo.size_bytes != metadata["size_bytes"],
+            normalize_datetime(photo.modified_at)
+            != normalize_datetime(metadata["modified_at"]),
+            photo.camera_make != metadata["camera_make"],
+            photo.camera_model != metadata["camera_model"],
+            photo.lens_model != metadata["lens_model"],
+            photo.focal_length != metadata["focal_length"],
+            photo.iso != metadata["iso"],
+            photo.aperture != metadata["aperture"],
+            photo.shutter_speed != metadata["shutter_speed"],
+            date_taken_changed,
+        )
+    )
+
+
+def apply_photo_metadata(
+    photo: Photo,
+    metadata: dict[str, object],
+    *,
+    scanned_at: datetime,
+) -> None:
+    photo.filename = metadata["filename"]
+    photo.extension = metadata["extension"]
+    photo.size_bytes = metadata["size_bytes"]
+    photo.modified_at = metadata["modified_at"]
+    photo.scanned_at = scanned_at
+    photo.camera_make = metadata["camera_make"]
+    photo.camera_model = metadata["camera_model"]
+    photo.lens_model = metadata["lens_model"]
+    photo.focal_length = metadata["focal_length"]
+    photo.iso = metadata["iso"]
+    photo.aperture = metadata["aperture"]
+    photo.shutter_speed = metadata["shutter_speed"]
+    photo.date_taken = metadata["date_taken"]
+
+
+def format_scan_file_metadata(
+    metadata: dict[str, object],
+    *,
+    scanned_at: datetime,
+) -> dict[str, object]:
+    date_taken = metadata["date_taken"]
+
+    return {
+        **metadata,
+        "modified_at": metadata["modified_at"].isoformat(),
+        "scanned_at": scanned_at.isoformat(),
+        "date_taken": date_taken.isoformat()
+        if isinstance(date_taken, datetime)
+        else None,
+    }
 
 
 def print_scan_counters(
@@ -324,33 +554,19 @@ def scan_folder(
                     session.add(photo)
                     new_files += 1
                 else:
-                    has_changes = any(
-                        (
-                            photo.filename != metadata["filename"],
-                            photo.extension != metadata["extension"],
-                            photo.size_bytes != metadata["size_bytes"],
-                            normalize_datetime(photo.modified_at)
-                            != normalize_datetime(metadata["modified_at"]),
+                    if metadata_values_changed(photo, metadata):
+                        apply_photo_metadata(
+                            photo,
+                            metadata,
+                            scanned_at=scanned_at,
                         )
-                    )
-
-                    if has_changes:
-                        photo.filename = metadata["filename"]
-                        photo.extension = metadata["extension"]
-                        photo.size_bytes = metadata["size_bytes"]
-                        photo.modified_at = metadata["modified_at"]
-                        photo.scanned_at = scanned_at
                         updated_files += 1
                     else:
                         skipped_files += 1
 
                 if files is not None:
                     files.append(
-                        {
-                            **metadata,
-                            "modified_at": metadata["modified_at"].isoformat(),
-                            "scanned_at": scanned_at.isoformat(),
-                        }
+                        format_scan_file_metadata(metadata, scanned_at=scanned_at)
                     )
 
                 session.add(
@@ -496,6 +712,72 @@ def get_stats() -> dict[str, object]:
             .order_by(Photo.extension)
             .all()
         )
+        camera_photos = (
+            session.query(Photo.camera_make, Photo.camera_model)
+            .filter((Photo.camera_make.is_not(None)) | (Photo.camera_model.is_not(None)))
+            .all()
+        )
+        lens_rows = (
+            session.query(Photo.lens_model, func.count(Photo.id))
+            .filter(Photo.lens_model.is_not(None))
+            .group_by(Photo.lens_model)
+            .order_by(func.count(Photo.id).desc(), Photo.lens_model)
+            .limit(10)
+            .all()
+        )
+        focal_length_rows = (
+            session.query(Photo.focal_length, func.count(Photo.id))
+            .filter(Photo.focal_length.is_not(None))
+            .group_by(Photo.focal_length)
+            .order_by(func.count(Photo.id).desc(), Photo.focal_length)
+            .limit(10)
+            .all()
+        )
+        year_rows = (
+            session.query(
+                func.strftime("%Y", Photo.date_taken).label("year"),
+                func.count(Photo.id),
+            )
+            .filter(Photo.date_taken.is_not(None))
+            .group_by("year")
+            .order_by("year")
+            .all()
+        )
+        month_rows = (
+            session.query(
+                func.strftime("%Y-%m", Photo.date_taken).label("month"),
+                func.count(Photo.id),
+            )
+            .filter(Photo.date_taken.is_not(None))
+            .group_by("month")
+            .order_by("month")
+            .all()
+        )
+        busiest_date_row = (
+            session.query(
+                func.strftime("%Y-%m-%d", Photo.date_taken).label("date"),
+                func.count(Photo.id),
+            )
+            .filter(Photo.date_taken.is_not(None))
+            .group_by("date")
+            .order_by(func.count(Photo.id).desc(), "date")
+            .first()
+        )
+
+    camera_counts = Counter(
+        " ".join(part for part in (make, model) if part)
+        for make, model in camera_photos
+    )
+    top_cameras = [
+        {"label": label, "count": count}
+        for label, count in camera_counts.most_common(10)
+        if label
+    ]
+    top_focal_lengths = [
+        {"label": format_focal_length(value), "count": count}
+        for value, count in focal_length_rows
+        if format_focal_length(value)
+    ]
 
     return {
         "total_photos": total_photos,
@@ -503,6 +785,16 @@ def get_stats() -> dict[str, object]:
         "file_type_counts": {
             extension: count for extension, count in file_type_rows
         },
+        "top_cameras": top_cameras,
+        "top_lenses": format_count_rows(lens_rows),
+        "top_focal_lengths": top_focal_lengths,
+        "photos_by_year": format_count_rows(year_rows),
+        "photos_by_month": format_count_rows(month_rows),
+        "busiest_date": (
+            {"label": busiest_date_row[0], "count": busiest_date_row[1]}
+            if busiest_date_row
+            else None
+        ),
         "newest_modified_at": (
             newest_modified_at.isoformat() if newest_modified_at else None
         ),

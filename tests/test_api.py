@@ -1,3 +1,4 @@
+import atexit
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -8,13 +9,15 @@ test_db_path = Path(test_db_dir.name) / "image_insight_test.db"
 os.environ["IMAGE_INSIGHT_DATABASE_URL"] = f"sqlite:///{test_db_path}"
 
 from fastapi.testclient import TestClient  # noqa: E402
+from PIL import Image  # noqa: E402
 
 from app import main as main_module  # noqa: E402
-from app.database import SessionLocal  # noqa: E402
+from app.database import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Photo, ScanSession, ScanSessionFile  # noqa: E402
 
 client = TestClient(app)
+atexit.register(engine.dispose)
 
 
 def test_health_returns_ok() -> None:
@@ -34,12 +37,23 @@ def test_stats_returns_valid_json_structure() -> None:
         "total_photos",
         "total_size_bytes",
         "file_type_counts",
+        "top_cameras",
+        "top_lenses",
+        "top_focal_lengths",
+        "photos_by_year",
+        "photos_by_month",
+        "busiest_date",
         "newest_modified_at",
         "oldest_modified_at",
     }
     assert isinstance(data["total_photos"], int)
     assert isinstance(data["total_size_bytes"], int)
     assert isinstance(data["file_type_counts"], dict)
+    assert isinstance(data["top_cameras"], list)
+    assert isinstance(data["top_lenses"], list)
+    assert isinstance(data["top_focal_lengths"], list)
+    assert isinstance(data["photos_by_year"], list)
+    assert isinstance(data["photos_by_month"], list)
 
 
 def test_scan_folder_creates_completed_scan_session(tmp_path: Path) -> None:
@@ -132,6 +146,50 @@ def test_scan_folder_counts_changed_files_as_updated(tmp_path: Path) -> None:
     assert second_data["new_files"] == 0
     assert second_data["updated_files"] == 1
     assert second_data["skipped_files"] == 0
+
+
+def test_scan_folder_extracts_exif_and_stats(tmp_path: Path) -> None:
+    image_file = tmp_path / "exif-photo.jpg"
+    image = Image.new("RGB", (1, 1), "white")
+    exif = Image.Exif()
+    exif[271] = "Canon"
+    exif[272] = "EOS R5"
+    exif[42036] = "RF50mm F1.8 STM"
+    exif[37386] = 50
+    exif[33437] = 1.8
+    exif[33434] = 0.008
+    exif[34855] = 400
+    exif[36867] = "2024:07:14 09:30:00"
+    image.save(image_file, exif=exif)
+
+    scan_response = client.get(
+        "/scan-folder",
+        params={"folder_path": str(tmp_path), "include_files": "true"},
+    )
+    scan_data = scan_response.json()
+
+    assert scan_response.status_code == 200
+    assert scan_data["new_files"] == 1
+    assert scan_data["failed_files"] == 0
+    assert scan_data["files"][0]["camera_make"] == "Canon"
+    assert scan_data["files"][0]["camera_model"] == "EOS R5"
+    assert scan_data["files"][0]["lens_model"] == "RF50mm F1.8 STM"
+    assert scan_data["files"][0]["focal_length"] == 50.0
+    assert scan_data["files"][0]["iso"] == 400
+    assert scan_data["files"][0]["aperture"] == 1.8
+    assert scan_data["files"][0]["shutter_speed"] == "1/100s"
+    assert scan_data["files"][0]["date_taken"].startswith("2024-07-14T09:30:00")
+
+    stats_response = client.get("/stats")
+    stats_data = stats_response.json()
+
+    assert stats_response.status_code == 200
+    assert {"label": "Canon EOS R5", "count": 1} in stats_data["top_cameras"]
+    assert {"label": "RF50mm F1.8 STM", "count": 1} in stats_data["top_lenses"]
+    assert {"label": "50mm", "count": 1} in stats_data["top_focal_lengths"]
+    assert {"label": "2024", "count": 1} in stats_data["photos_by_year"]
+    assert {"label": "2024-07", "count": 1} in stats_data["photos_by_month"]
+    assert stats_data["busiest_date"] == {"label": "2024-07-14", "count": 1}
 
 
 def test_failed_scan_session_can_be_resumed(tmp_path: Path, monkeypatch) -> None:

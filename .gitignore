@@ -1,4 +1,6 @@
 __pycache__/
 *.pyc
+.pytest_cache/
+pytest-cache-files-*/
 .venv/
 image_insight.db

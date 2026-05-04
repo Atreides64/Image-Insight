@@ -6,7 +6,6 @@ A local-first media metadata analytics platform for analyzing and organizing exi
 
 - Scan local media folders
 - Extract metadata from images
-- Detect duplicates
 - Visualize trends
 - Support fragmented archives
 
@@ -16,6 +15,7 @@ A local-first media metadata analytics platform for analyzing and organizing exi
 - FastAPI
 - SQLite
 - React + TypeScript
+- Recharts
 
 ## Backend Setup
 
@@ -53,6 +53,10 @@ uvicorn app.main:app --reload
 
 The backend creates a local SQLite database at the repo root as `image_insight.db` automatically.
 
+Image Insight v0.2.0 extracts EXIF metadata when it is available and stores
+camera make/model, lens model, focal length, ISO, aperture, shutter speed, and
+capture date. Missing or unreadable EXIF data is ignored so scans can continue.
+
 `/scan-folder` returns a concise scan summary by default. To include the full
 file list in the response, pass `include_files=true`.
 
@@ -82,6 +86,13 @@ Scan session endpoints:
 - `GET /scan-sessions`
 - `GET /scan-sessions?folder_path=/path/to/folder`
 - `GET /scan-sessions/{scan_id}`
+
+Stats are available from `GET /stats` and include:
+
+- Library totals and file type counts
+- Top cameras, lenses, and focal lengths
+- Photos by year and month
+- Busiest capture date when EXIF dates are available
 
 Then open:
 
@@ -124,4 +135,5 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 ## Status
 
-In active development.
+v0.2.0 adds EXIF analytics for camera, lens, focal length, and capture timeline
+insights. Search, duplicates, maps, and background jobs remain future work.
