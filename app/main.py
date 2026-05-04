@@ -755,11 +755,13 @@ def search_photos(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, object]:
-    if limit < 1 or limit > 100:
-        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="limit must be 1 or greater")
 
     if offset < 0:
         raise HTTPException(status_code=400, detail="offset must be 0 or greater")
+
+    limit = min(limit, 500)
 
     parsed_date_from = parse_search_datetime(date_from, end_of_day=False)
     parsed_date_to = parse_search_datetime(date_to, end_of_day=True)

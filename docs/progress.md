@@ -5,7 +5,7 @@ Image Insight has a FastAPI backend with `/health`, `POST /scan-folder`, `/scan-
 # Files Changed This Session
 
 - Modified `app/main.py` to add `GET /photos/search` with metadata filters, pagination, validation, and v0.4.0 API metadata.
-- Modified `tests/test_api.py` to cover metadata filtering, pagination, null EXIF handling, invalid search ranges, invalid date values, and over-limit search requests.
+- Modified `tests/test_api.py` to cover metadata filtering, pagination defaults, max-limit capping, total counts, null EXIF handling, invalid search ranges, invalid date values, and negative pagination values.
 - Modified `frontend/src/App.tsx` to add a compact metadata filter form and photo results table.
 - Modified `frontend/src/styles.css` to style the search/filter panel and results summary.
 - Modified `README.md` and `docs/progress.md`.
@@ -16,8 +16,8 @@ Image Insight has a FastAPI backend with `/health`, `POST /scan-folder`, `/scan-
 - Make `POST /scan-folder` return quickly with `scan_id`; expose live progress through `/scan-status/{scan_id}`.
 - Keep metadata search as a read-only query over the existing `photos` table; do not add new storage or change scan behavior.
 - Use optional query params for `/photos/search` and return `total_count`, `limit`, `offset`, and `results` for simple pagination.
-- Cap `/photos/search` `limit` at 100 so the endpoint cannot accidentally return an entire large library in one response.
-- Return clean HTTP 400 errors for invalid date values, reversed date ranges, reversed focal-length ranges, negative offsets, and invalid limits.
+- Default `/photos/search` to `limit=50` and `offset=0`; cap requested limits above 500 to 500 so the endpoint cannot accidentally return an entire large library in one response.
+- Return clean HTTP 400 errors for invalid date values, reversed date ranges, reversed focal-length ranges, negative offsets, and non-positive limits.
 - Use Pillow for best-effort EXIF extraction during scans; EXIF parse failures return null metadata instead of failing the file or scan.
 - Store capture date as UTC because EXIF dates often lack timezone information.
 - Add a small startup SQLite column check for the new nullable `photos` EXIF columns because the project does not have migrations yet.
@@ -92,4 +92,4 @@ Open:
 - 2026-05-04: Ran branch stability checks: backend pytest passes locally, frontend production build passes, and `git diff --check` reports no whitespace errors.
 - 2026-05-04: Added v0.3.0 background scan jobs with `POST /scan-folder`, `/scan-status/{scan_id}`, frontend polling, live counters, and duplicate running scan prevention.
 - 2026-05-04: Added v0.4.0 metadata search with `/photos/search`, backend filter tests, dashboard filter controls, and a simple results table.
-- 2026-05-04: Added pre-merge search safety tests for malformed dates and over-limit requests; confirmed frontend no-results handling and capped search responses.
+- 2026-05-04: Tightened `/photos/search` pagination safety with default `limit=50`, max cap 500, default `offset=0`, negative pagination errors, total-count response checks, and frontend requests capped below 500.

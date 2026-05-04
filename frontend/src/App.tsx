@@ -97,6 +97,7 @@ type ScanStatus = {
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted"];
+const PHOTO_SEARCH_LIMIT = 25;
 
 function formatBytes(bytes: number): string {
   return new Intl.NumberFormat("en-US").format(bytes);
@@ -232,7 +233,10 @@ function App() {
   }, []);
 
   const runPhotoSearch = useCallback(async () => {
-    const params = new URLSearchParams({ limit: "25", offset: "0" });
+    const params = new URLSearchParams({
+      limit: String(Math.min(PHOTO_SEARCH_LIMIT, 500)),
+      offset: "0",
+    });
 
     Object.entries(photoSearchFilters).forEach(([key, value]) => {
       const trimmedValue = value.trim();

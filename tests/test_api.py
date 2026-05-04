@@ -318,7 +318,29 @@ def test_search_photos_filters_metadata(tmp_path: Path) -> None:
     assert str(tmp_path / "fuji-street.png") not in returned_paths
 
 
-def test_search_photos_rejects_invalid_ranges() -> None:
+def test_search_photos_pagination_defaults_and_caps() -> None:
+    default_response = client.get("/photos/search")
+    capped_response = client.get(
+        "/photos/search",
+        params={"limit": 999},
+    )
+
+    default_data = default_response.json()
+    capped_data = capped_response.json()
+
+    assert default_response.status_code == 200
+    assert set(default_data) == {"total_count", "limit", "offset", "results"}
+    assert default_data["limit"] == 50
+    assert default_data["offset"] == 0
+    assert isinstance(default_data["total_count"], int)
+    assert len(default_data["results"]) <= 50
+    assert capped_response.status_code == 200
+    assert capped_data["limit"] == 500
+    assert capped_data["offset"] == 0
+    assert len(capped_data["results"]) <= 500
+
+
+def test_search_photos_rejects_invalid_ranges_and_negative_pagination() -> None:
     focal_response = client.get(
         "/photos/search",
         params={"min_focal_length": 100, "max_focal_length": 50},
@@ -331,17 +353,23 @@ def test_search_photos_rejects_invalid_ranges() -> None:
         "/photos/search",
         params={"date_from": "not-a-date"},
     )
-    over_limit_response = client.get(
+    negative_limit_response = client.get(
         "/photos/search",
-        params={"limit": 500},
+        params={"limit": -1},
+    )
+    negative_offset_response = client.get(
+        "/photos/search",
+        params={"offset": -1},
     )
 
     assert focal_response.status_code == 400
     assert date_response.status_code == 400
     assert invalid_date_response.status_code == 400
     assert invalid_date_response.json()["detail"] == "Invalid date value: not-a-date"
-    assert over_limit_response.status_code == 400
-    assert over_limit_response.json()["detail"] == "limit must be between 1 and 100"
+    assert negative_limit_response.status_code == 400
+    assert negative_limit_response.json()["detail"] == "limit must be 1 or greater"
+    assert negative_offset_response.status_code == 400
+    assert negative_offset_response.json()["detail"] == "offset must be 0 or greater"
 
 
 def test_failed_scan_session_can_be_resumed(tmp_path: Path, monkeypatch) -> None:

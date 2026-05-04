@@ -130,7 +130,9 @@ curl "http://127.0.0.1:8000/photos/search?camera_model=EOS&min_focal_length=24&m
 ```
 
 The response includes `total_count`, `limit`, `offset`, and `results` for
-simple pagination.
+simple pagination. Search defaults to `limit=50` and `offset=0`; requested
+limits above 500 are capped at 500, and negative pagination values return a
+clean `400` response.
 
 Then open:
 
