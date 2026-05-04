@@ -35,12 +35,14 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 
 - The backend creates tables at startup with `Base.metadata.create_all(bind=engine)` for now.
 - The default SQLite database path is always the repo-root `image_insight.db`; tests override it with `IMAGE_INSIGHT_DATABASE_URL`.
-- `/scan-folder` scans local paths provided by the user and upserts photos by unique `path`.
-- `/scan-folder` returns a concise summary by default and only includes the full `files` payload when `include_files=true`.
+- `POST /scan-folder` starts a lightweight background scan thread and returns `scan_id` quickly.
+- `/scan-status/{scan_id}` returns persisted scan counters and elapsed time for polling.
+- Background scan threads upsert photos by unique `path` and update the existing SQLite scan session rows.
 - Scan progress is printed with `print(..., flush=True)` so terminal output appears during long scans.
 - Scan counters distinguish `files_seen`, `image_files_matched`, `new_files`, `updated_files`, `skipped_files`, and `failed_files`.
 - Existing rows only count as `updated_files` when file metadata actually changed; unchanged rescans count as `skipped_files`.
 - Long scans commit database writes every 500 matched image files so progress is visible before the full run completes.
+- Starting a duplicate running scan for the same folder returns a conflict unless `resume=true` is attaching to the existing running session.
 - The frontend fetches the backend from `VITE_API_BASE_URL`, defaulting to `http://127.0.0.1:8000`.
 - CORS is enabled for the Vite dev server on `localhost:5173` and `127.0.0.1:5173`.
 - Tests set `IMAGE_INSIGHT_DATABASE_URL` before importing the app so they use a temporary SQLite database.

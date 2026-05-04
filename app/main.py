@@ -2,6 +2,7 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Thread
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +28,7 @@ RESUMABLE_SCAN_STATUSES = {"running", "interrupted", "failed"}
 app = FastAPI(
     title="Image Insight API",
     description="Backend API for local-first media metadata analytics.",
-    version="0.2.0",
+    version="0.3.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -234,6 +235,25 @@ def format_focal_length(value: float | None) -> str | None:
     return f"{value:g}mm"
 
 
+def normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+
+    return value.astimezone(timezone.utc)
+
+
+def calculate_elapsed_seconds(scan_session: ScanSession) -> float:
+    end_time = scan_session.completed_at or datetime.now(timezone.utc)
+
+    return round(
+        (
+            normalize_datetime(end_time)
+            - normalize_datetime(scan_session.started_at)
+        ).total_seconds(),
+        2,
+    )
+
+
 def format_scan_session(scan_session: ScanSession) -> dict[str, object]:
     return {
         "scan_id": scan_session.id,
@@ -255,11 +275,20 @@ def format_scan_session(scan_session: ScanSession) -> dict[str, object]:
     }
 
 
-def normalize_datetime(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-
-    return value.astimezone(timezone.utc)
+def format_scan_status(scan_session: ScanSession) -> dict[str, object]:
+    return {
+        "scan_id": scan_session.id,
+        "status": scan_session.status,
+        "folder_path": scan_session.folder_path,
+        "files_seen": scan_session.files_seen,
+        "image_files_matched": scan_session.image_files_matched,
+        "new_files": scan_session.new_files,
+        "updated_files": scan_session.updated_files,
+        "skipped_files": scan_session.skipped_files,
+        "failed_files": scan_session.failed_files,
+        "elapsed_seconds": calculate_elapsed_seconds(scan_session),
+        "last_error": scan_session.last_error,
+    }
 
 
 def metadata_values_changed(photo: Photo, metadata: dict[str, object]) -> bool:
@@ -390,18 +419,12 @@ def get_latest_scan_session(session, folder_path: str) -> ScanSession | None:
     )
 
 
-def get_or_create_scan_session(session, *, folder_path: str, resume: bool) -> tuple[ScanSession, set[str], bool]:
+def get_or_create_scan_session(session, *, folder_path: str, resume: bool) -> tuple[int, bool, bool]:
     latest_session = get_latest_scan_session(session, folder_path)
-    processed_paths: set[str] = set()
     resumed = False
 
     if latest_session and latest_session.status == "running":
-        latest_session.status = "interrupted"
-        latest_session.completed_at = datetime.now(timezone.utc)
-        latest_session.last_error = (
-            latest_session.last_error or "Scan stopped before completion."
-        )
-        session.commit()
+        return latest_session.id, False, True
 
     if (
         resume
@@ -409,13 +432,8 @@ def get_or_create_scan_session(session, *, folder_path: str, resume: bool) -> tu
         and latest_session.status in RESUMABLE_SCAN_STATUSES
     ):
         scan_session = latest_session
-        processed_paths = {
-            row.path
-            for row in session.query(ScanSessionFile.path)
-            .filter(ScanSessionFile.scan_session_id == scan_session.id)
-            .all()
-        }
         scan_session.status = "running"
+        scan_session.started_at = datetime.now(timezone.utc)
         scan_session.completed_at = None
         scan_session.last_error = None
         reset_scan_session_progress(scan_session)
@@ -439,61 +457,12 @@ def get_or_create_scan_session(session, *, folder_path: str, resume: bool) -> tu
         session.commit()
         session.refresh(scan_session)
 
-    return scan_session, processed_paths, resumed
+    return scan_session.id, resumed, False
 
 
-def build_scan_response(
-    *,
-    scan_session: ScanSession,
-    files_seen: int,
-    image_files_matched: int,
-    new_files: int,
-    updated_files: int,
-    skipped_files: int,
-    failed_files: int,
-    elapsed_time: float,
-    folder_path: str,
-    files: list[dict[str, object]] | None,
-) -> dict[str, object]:
-    response = {
-        "scan_id": scan_session.id,
-        "status": scan_session.status,
-        "total_files": image_files_matched,
-        "files_seen": files_seen,
-        "image_files_matched": image_files_matched,
-        "new_files": new_files,
-        "updated_files": updated_files,
-        "skipped_files": skipped_files,
-        "failed_files": failed_files,
-        "elapsed_seconds": round(elapsed_time, 2),
-        "folder_path": folder_path,
-        "last_error": scan_session.last_error,
-    }
-
-    if files is not None:
-        response["files"] = files
-
-    return response
-
-
-@app.get("/scan-folder")
-def scan_folder(
-    folder_path: str,
-    include_files: bool = False,
-    resume: bool = False,
-) -> dict[str, object]:
-    folder = Path(folder_path).expanduser()
+def run_scan_job(scan_id: int, *, resumed: bool) -> None:
     start_time = time.monotonic()
-    print(f"Scan started: {folder}", flush=True)
-
-    if not folder.exists() or not folder.is_dir():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Folder not found: {folder_path}",
-        )
-
     scanned_at = datetime.now(timezone.utc)
-    files = [] if include_files else None
     files_seen = 0
     image_files_matched = 0
     new_files = 0
@@ -502,11 +471,24 @@ def scan_folder(
     failed_files = 0
 
     with SessionLocal() as session:
-        scan_session, processed_paths, resumed = get_or_create_scan_session(
-            session,
-            folder_path=str(folder),
-            resume=resume,
-        )
+        scan_session = session.get(ScanSession, scan_id)
+
+        if scan_session is None:
+            print(f"Scan session not found: {scan_id}", flush=True)
+            return
+
+        folder = Path(scan_session.folder_path)
+        processed_paths = set()
+
+        if resumed:
+            processed_paths = {
+                row.path
+                for row in session.query(ScanSessionFile.path)
+                .filter(ScanSessionFile.scan_session_id == scan_session.id)
+                .all()
+            }
+
+        print(f"Scan started: {folder}", flush=True)
 
         try:
             for path in folder.rglob("*"):
@@ -564,11 +546,6 @@ def scan_folder(
                     else:
                         skipped_files += 1
 
-                if files is not None:
-                    files.append(
-                        format_scan_file_metadata(metadata, scanned_at=scanned_at)
-                    )
-
                 session.add(
                     ScanSessionFile(
                         scan_session_id=scan_session.id,
@@ -611,7 +588,8 @@ def scan_folder(
             scan_session.completed_at = datetime.now(timezone.utc)
             scan_session.last_error = str(error)
             session.commit()
-            raise HTTPException(status_code=500, detail=f"Scan failed: {error}") from error
+            print(f"Scan failed: {error}", flush=True)
+            return
 
         apply_scan_counters(
             scan_session,
@@ -643,18 +621,57 @@ def scan_folder(
         flush=True,
     )
 
-    return build_scan_response(
-        scan_session=scan_session,
-        files_seen=files_seen,
-        image_files_matched=image_files_matched,
-        new_files=new_files,
-        updated_files=updated_files,
-        skipped_files=skipped_files,
-        failed_files=failed_files,
-        elapsed_time=elapsed_time,
-        folder_path=str(folder),
-        files=files,
+
+def start_scan_thread(scan_id: int, *, resumed: bool) -> None:
+    thread = Thread(
+        target=run_scan_job,
+        kwargs={"scan_id": scan_id, "resumed": resumed},
+        daemon=True,
     )
+    thread.start()
+
+
+@app.post("/scan-folder")
+def scan_folder(
+    folder_path: str,
+    resume: bool = False,
+) -> dict[str, object]:
+    folder = Path(folder_path).expanduser()
+
+    if not folder.exists() or not folder.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Folder not found: {folder_path}",
+        )
+
+    with SessionLocal() as session:
+        scan_id, resumed, already_running = get_or_create_scan_session(
+            session,
+            folder_path=str(folder),
+            resume=resume,
+        )
+
+    if already_running:
+        if resume:
+            return {
+                "scan_id": scan_id,
+                "status": "running",
+                "folder_path": str(folder),
+                "message": "A scan is already running for this folder.",
+            }
+
+        raise HTTPException(
+            status_code=409,
+            detail="A scan is already running for this folder.",
+        )
+
+    start_scan_thread(scan_id, resumed=resumed)
+
+    return {
+        "scan_id": scan_id,
+        "status": "running",
+        "folder_path": str(folder),
+    }
 
 
 @app.get("/scan-sessions")
@@ -686,6 +703,17 @@ def get_scan_session(scan_id: int) -> dict[str, object]:
         raise HTTPException(status_code=404, detail=f"Scan session not found: {scan_id}")
 
     return format_scan_session(scan_session)
+
+
+@app.get("/scan-status/{scan_id}")
+def get_scan_status(scan_id: int) -> dict[str, object]:
+    with SessionLocal() as session:
+        scan_session = session.get(ScanSession, scan_id)
+
+    if scan_session is None:
+        raise HTTPException(status_code=404, detail=f"Scan session not found: {scan_id}")
+
+    return format_scan_status(scan_session)
 
 
 @app.get("/photos")
