@@ -87,3 +87,4 @@ Open:
 - 2026-05-04: Added v0.2.0 EXIF analytics with camera/lens/focal length metadata, capture timeline stats, dashboard insight cards, and camera/lens/timeline charts.
 - 2026-05-04: Updated backend CI to install Ubuntu JPEG/zlib development libraries before Python dependencies so Pillow can build when wheels are unavailable.
 - 2026-05-04: Added pytest repo-root import configuration, backend CI `PYTHONPATH=.`, and Python 3.12 pin to fix `ModuleNotFoundError: No module named 'app'` and avoid latest-Python dependency churn.
+- 2026-05-04: Ran branch stability checks: backend pytest passes locally, frontend production build passes, and `git diff --check` reports no whitespace errors.
