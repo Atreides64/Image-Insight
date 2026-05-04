@@ -28,7 +28,7 @@ RESUMABLE_SCAN_STATUSES = {"running", "interrupted", "failed"}
 app = FastAPI(
     title="Image Insight API",
     description="Backend API for local-first media metadata analytics.",
-    version="0.4.0",
+    version="0.5.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -298,6 +298,7 @@ def format_scan_session(scan_session: ScanSession) -> dict[str, object]:
         "updated_files": scan_session.updated_files,
         "skipped_files": scan_session.skipped_files,
         "failed_files": scan_session.failed_files,
+        "elapsed_seconds": calculate_elapsed_seconds(scan_session),
         "last_error": scan_session.last_error,
     }
 
@@ -702,7 +703,15 @@ def scan_folder(
 
 
 @app.get("/scan-sessions")
-def list_scan_sessions(folder_path: str | None = None) -> dict[str, object]:
+def list_scan_sessions(
+    folder_path: str | None = None,
+    limit: int = 25,
+) -> dict[str, object]:
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="limit must be 1 or greater")
+
+    limit = min(limit, 100)
+
     with SessionLocal() as session:
         query = session.query(ScanSession)
 
@@ -712,11 +721,12 @@ def list_scan_sessions(folder_path: str | None = None) -> dict[str, object]:
 
         scan_sessions = (
             query.order_by(ScanSession.started_at.desc(), ScanSession.id.desc())
-            .limit(100)
+            .limit(limit)
             .all()
         )
 
     return {
+        "limit": limit,
         "scan_sessions": [format_scan_session(scan_session) for scan_session in scan_sessions],
     }
 

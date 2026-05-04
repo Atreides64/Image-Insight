@@ -100,8 +100,13 @@ Scan session endpoints:
 
 - `GET /scan-sessions`
 - `GET /scan-sessions?folder_path=/path/to/folder`
+- `GET /scan-sessions?limit=25`
 - `GET /scan-sessions/{scan_id}`
 - `GET /scan-status/{scan_id}`
+
+`GET /scan-sessions` returns recent scan history with folder path, status,
+start/completion timestamps, elapsed seconds, counters, and any last error.
+The optional `limit` parameter defaults to 25 and is capped at 100.
 
 Stats are available from `GET /stats` and include:
 
@@ -175,5 +180,5 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 ## Status
 
-v0.4.0 adds metadata search and filtering for indexed photos. Duplicates, maps,
-and external job services remain future work.
+v0.5.0 adds recent scan history in the API and dashboard. Duplicates, maps, and
+external job services remain future work.

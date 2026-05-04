@@ -77,6 +77,7 @@ type ScanSession = {
   updated_files: number;
   skipped_files: number;
   failed_files: number;
+  elapsed_seconds: number;
   last_error: string | null;
 };
 
@@ -172,6 +173,7 @@ function App() {
   const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [lastScanSession, setLastScanSession] = useState<ScanSession | null>(null);
+  const [scanHistory, setScanHistory] = useState<ScanSession[]>([]);
   const [activeScanId, setActiveScanId] = useState<number | null>(null);
   const [activeScanStatus, setActiveScanStatus] = useState<ScanStatus | null>(null);
   const [photoSearchFilters, setPhotoSearchFilters] = useState<PhotoSearchFilters>({
@@ -232,6 +234,21 @@ function App() {
     }
   }, []);
 
+  const loadScanHistory = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/scan-sessions?limit=10`);
+
+      if (!response.ok) {
+        throw new Error(`Scan history request failed with ${response.status}`);
+      }
+
+      const data = (await response.json()) as { scan_sessions: ScanSession[] };
+      setScanHistory(data.scan_sessions);
+    } catch {
+      setScanHistory([]);
+    }
+  }, []);
+
   const runPhotoSearch = useCallback(async () => {
     const params = new URLSearchParams({
       limit: String(Math.min(PHOTO_SEARCH_LIMIT, 500)),
@@ -277,7 +294,8 @@ function App() {
 
   useEffect(() => {
     loadStats();
-  }, [loadStats]);
+    void loadScanHistory();
+  }, [loadScanHistory, loadStats]);
 
   useEffect(() => {
     void loadLatestScanSession(folderPath);
@@ -310,6 +328,7 @@ function App() {
           setIsScanning(false);
           setActiveScanId(null);
           await loadLatestScanSession(status.folder_path);
+          await loadScanHistory();
 
           if (status.status === "completed") {
             const failedFilesMessage =
@@ -347,10 +366,16 @@ function App() {
       isCancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [activeScanId, loadLatestScanSession, loadStats]);
+  }, [activeScanId, loadLatestScanSession, loadScanHistory, loadStats]);
 
-  async function runScan({ resume }: { resume: boolean }) {
-    const trimmedPath = folderPath.trim();
+  async function runScan({
+    resume,
+    targetFolderPath,
+  }: {
+    resume: boolean;
+    targetFolderPath?: string;
+  }) {
+    const trimmedPath = (targetFolderPath ?? folderPath).trim();
 
     if (!trimmedPath) {
       setScanError("Enter a folder path to scan.");
@@ -390,9 +415,12 @@ function App() {
           ? `Resume started for ${result.folder_path}.`
           : `Scan started for ${result.folder_path}.`,
       );
+      setFolderPath(result.folder_path);
       await loadLatestScanSession(trimmedPath);
+      await loadScanHistory();
     } catch (caughtError) {
       await loadLatestScanSession(trimmedPath);
+      await loadScanHistory();
       setIsScanning(false);
       setScanError(
         caughtError instanceof Error
@@ -446,7 +474,10 @@ function App() {
 
   const canResumeLastScan =
     lastScanSession !== null &&
-    ["failed", "interrupted", "running"].includes(lastScanSession.status);
+    ["failed", "interrupted"].includes(lastScanSession.status);
+
+  const canResumeScan = (scanSession: ScanSession) =>
+    ["failed", "interrupted"].includes(scanSession.status);
 
   return (
     <main className="app-shell">
@@ -567,6 +598,85 @@ function App() {
 
         {scanMessage && <p className="scan-feedback success">{scanMessage}</p>}
         {scanError && <p className="scan-feedback failure">{scanError}</p>}
+      </section>
+
+      <section className="table-section">
+        <div className="section-heading">
+          <h2>Scan History</h2>
+          <span>{scanHistory.length.toLocaleString()} recent scans</span>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Folder</th>
+              <th>Matched</th>
+              <th>Changes</th>
+              <th>Duration</th>
+              <th>Completed</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {scanHistory.length > 0 ? (
+              scanHistory.map((scanSession) => (
+                <tr key={scanSession.scan_id}>
+                  <td>
+                    <span className={`scan-status ${scanSession.status}`}>
+                      {formatScanStatus(scanSession.status)}
+                    </span>
+                  </td>
+                  <td>{scanSession.folder_path}</td>
+                  <td>{scanSession.image_files_matched.toLocaleString()}</td>
+                  <td>
+                    {scanSession.new_files.toLocaleString()} new,{" "}
+                    {scanSession.updated_files.toLocaleString()} updated,{" "}
+                    {scanSession.failed_files.toLocaleString()} failed
+                  </td>
+                  <td>{scanSession.elapsed_seconds.toFixed(2)}s</td>
+                  <td>{formatDate(scanSession.completed_at)}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button
+                        type="button"
+                        className="small-action-button"
+                        onClick={() =>
+                          void runScan({
+                            resume: false,
+                            targetFolderPath: scanSession.folder_path,
+                          })
+                        }
+                        disabled={isScanning}
+                      >
+                        Rerun
+                      </button>
+                      {canResumeScan(scanSession) && (
+                        <button
+                          type="button"
+                          className="small-action-button"
+                          onClick={() =>
+                            void runScan({
+                              resume: true,
+                              targetFolderPath: scanSession.folder_path,
+                            })
+                          }
+                          disabled={isScanning}
+                        >
+                          Resume
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7}>No scan history yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </section>
 
       <section className="search-section" aria-labelledby="photo-search-heading">

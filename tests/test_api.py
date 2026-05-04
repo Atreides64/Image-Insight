@@ -147,6 +147,63 @@ def test_scan_folder_starts_background_job_and_status_completes(tmp_path: Path) 
     assert second_scan_status["failed_files"] == 0
 
 
+def test_scan_sessions_history_response_and_limit_behavior(tmp_path: Path) -> None:
+    scan_sessions = [
+        ScanSession(
+            folder_path=str(tmp_path / f"folder-{index}"),
+            status="completed",
+            started_at=datetime(2024, 1, index + 1, tzinfo=timezone.utc),
+            completed_at=datetime(2024, 1, index + 1, 0, 0, index, tzinfo=timezone.utc),
+            files_seen=index,
+            image_files_matched=index,
+            new_files=index,
+            updated_files=0,
+            skipped_files=0,
+            failed_files=0,
+            last_error=None,
+        )
+        for index in range(3)
+    ]
+
+    with SessionLocal() as session:
+        session.add_all(scan_sessions)
+        session.commit()
+
+    response = client.get("/scan-sessions", params={"limit": 2})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["limit"] == 2
+    assert len(data["scan_sessions"]) == 2
+
+    first_scan = data["scan_sessions"][0]
+
+    assert {
+        "scan_id",
+        "folder_path",
+        "status",
+        "started_at",
+        "completed_at",
+        "files_seen",
+        "image_files_matched",
+        "new_files",
+        "updated_files",
+        "skipped_files",
+        "failed_files",
+        "elapsed_seconds",
+        "last_error",
+    } == set(first_scan)
+    assert first_scan["elapsed_seconds"] >= 0
+
+    capped_response = client.get("/scan-sessions", params={"limit": 500})
+    invalid_response = client.get("/scan-sessions", params={"limit": 0})
+
+    assert capped_response.status_code == 200
+    assert capped_response.json()["limit"] == 100
+    assert invalid_response.status_code == 400
+    assert invalid_response.json()["detail"] == "limit must be 1 or greater"
+
+
 def test_scan_folder_counts_changed_files_as_updated(tmp_path: Path) -> None:
     image_file = tmp_path / "photo.jpg"
     image_file.write_text("first version")
