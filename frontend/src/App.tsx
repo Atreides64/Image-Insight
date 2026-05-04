@@ -31,18 +31,11 @@ type Stats = {
   oldest_modified_at: string | null;
 };
 
-type ScanResult = {
+type ScanStartResult = {
   scan_id: number;
   status: string;
-  total_files: number;
-  new_files: number;
-  updated_files: number;
-  skipped_files: number;
-  failed_files: number;
-  elapsed_seconds: number;
   folder_path: string;
-  last_error: string | null;
-  files?: Array<Record<string, unknown>>;
+  message?: string;
 };
 
 type ScanSession = {
@@ -60,8 +53,23 @@ type ScanSession = {
   last_error: string | null;
 };
 
+type ScanStatus = {
+  scan_id: number;
+  folder_path: string;
+  status: string;
+  files_seen: number;
+  image_files_matched: number;
+  new_files: number;
+  updated_files: number;
+  skipped_files: number;
+  failed_files: number;
+  elapsed_seconds: number;
+  last_error: string | null;
+};
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted"];
 
 function formatBytes(bytes: number): string {
   return new Intl.NumberFormat("en-US").format(bytes);
@@ -124,6 +132,8 @@ function App() {
   const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [lastScanSession, setLastScanSession] = useState<ScanSession | null>(null);
+  const [activeScanId, setActiveScanId] = useState<number | null>(null);
+  const [activeScanStatus, setActiveScanStatus] = useState<ScanStatus | null>(null);
 
   const loadStats = useCallback(async () => {
     try {
@@ -179,6 +189,72 @@ function App() {
     void loadLatestScanSession(folderPath);
   }, [folderPath, loadLatestScanSession]);
 
+  useEffect(() => {
+    if (activeScanId === null) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function loadScanStatus() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/scan-status/${activeScanId}`);
+
+        if (!response.ok) {
+          throw new Error(`Scan status request failed with ${response.status}`);
+        }
+
+        const status = (await response.json()) as ScanStatus;
+
+        if (isCancelled) {
+          return;
+        }
+
+        setActiveScanStatus(status);
+
+        if (TERMINAL_SCAN_STATUSES.includes(status.status)) {
+          setIsScanning(false);
+          setActiveScanId(null);
+          await loadLatestScanSession(status.folder_path);
+
+          if (status.status === "completed") {
+            const failedFilesMessage =
+              status.failed_files > 0
+                ? ` ${status.failed_files.toLocaleString()} could not be read this pass.`
+                : "";
+
+            setScanMessage(
+              `Scan complete for ${status.folder_path}. ${status.image_files_matched.toLocaleString()} image files matched, ${status.new_files.toLocaleString()} new, ${status.updated_files.toLocaleString()} updated, ${status.skipped_files.toLocaleString()} skipped in ${status.elapsed_seconds.toFixed(2)}s.${failedFilesMessage}`,
+            );
+            await loadStats();
+          } else {
+            setScanError(
+              status.last_error
+                ? `The scan stopped before finishing. ${status.last_error}`
+                : "The scan stopped before finishing.",
+            );
+          }
+        }
+      } catch (caughtError) {
+        if (!isCancelled) {
+          setScanError(
+            caughtError instanceof Error
+              ? caughtError.message
+              : "Unable to load scan status.",
+          );
+        }
+      }
+    }
+
+    void loadScanStatus();
+    const intervalId = window.setInterval(() => void loadScanStatus(), 2000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeScanId, loadLatestScanSession, loadStats]);
+
   async function runScan({ resume }: { resume: boolean }) {
     const trimmedPath = folderPath.trim();
 
@@ -195,6 +271,7 @@ function App() {
     try {
       const response = await fetch(
         `${API_BASE_URL}/scan-folder?folder_path=${encodeURIComponent(trimmedPath)}&resume=${resume}`,
+        { method: "POST" },
       );
 
       if (!response.ok) {
@@ -210,27 +287,24 @@ function App() {
         throw new Error(message);
       }
 
-      const result = (await response.json()) as ScanResult;
-      const failedFilesMessage =
-        result.failed_files > 0
-          ? ` ${result.failed_files.toLocaleString()} could not be read this pass.`
-          : "";
-      const resumePrefix = resume ? "Resumed scan complete" : "Scan complete";
+      const result = (await response.json()) as ScanStartResult;
 
+      setActiveScanId(result.scan_id);
+      setActiveScanStatus(null);
       setScanMessage(
-        `${resumePrefix} for ${result.folder_path}. ${result.total_files.toLocaleString()} image files matched, ${result.new_files.toLocaleString()} new, ${result.updated_files.toLocaleString()} updated, ${result.skipped_files.toLocaleString()} skipped in ${result.elapsed_seconds.toFixed(2)}s.${failedFilesMessage}`,
+        resume
+          ? `Resume started for ${result.folder_path}.`
+          : `Scan started for ${result.folder_path}.`,
       );
-      await loadStats();
       await loadLatestScanSession(trimmedPath);
     } catch (caughtError) {
       await loadLatestScanSession(trimmedPath);
+      setIsScanning(false);
       setScanError(
         caughtError instanceof Error
-          ? `The scan stopped before finishing. ${caughtError.message}`
-          : "The scan stopped before finishing. You can review the last scan status and resume it when ready.",
+          ? `Could not start scan. ${caughtError.message}`
+          : "Could not start scan. You can review the last scan status and resume it when ready.",
       );
-    } finally {
-      setIsScanning(false);
     }
   }
 
@@ -348,8 +422,37 @@ function App() {
           <div className="scan-progress" role="status" aria-live="polite">
             <span className="spinner" aria-hidden="true" />
             <span>
-              Scanning folder... this may take several minutes for large archives.
+              Scanning folder in the background... dashboard updates every few seconds.
             </span>
+          </div>
+        )}
+
+        {activeScanStatus && (
+          <div className="scan-live-panel" aria-label="Live scan progress">
+            <div>
+              <span>Files Seen</span>
+              <strong>{activeScanStatus.files_seen.toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>Matched</span>
+              <strong>{activeScanStatus.image_files_matched.toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>New</span>
+              <strong>{activeScanStatus.new_files.toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>Updated</span>
+              <strong>{activeScanStatus.updated_files.toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>Skipped</span>
+              <strong>{activeScanStatus.skipped_files.toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>Failed</span>
+              <strong>{activeScanStatus.failed_files.toLocaleString()}</strong>
+            </div>
           </div>
         )}
 
