@@ -474,10 +474,10 @@ function App() {
 
   const canResumeLastScan =
     lastScanSession !== null &&
-    ["failed", "interrupted", "running"].includes(lastScanSession.status);
+    ["failed", "interrupted"].includes(lastScanSession.status);
 
   const canResumeScan = (scanSession: ScanSession) =>
-    ["failed", "interrupted", "running"].includes(scanSession.status);
+    ["failed", "interrupted"].includes(scanSession.status);
 
   return (
     <main className="app-shell">

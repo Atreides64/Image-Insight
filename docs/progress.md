@@ -96,3 +96,4 @@ Open:
 - 2026-05-04: Tightened `/photos/search` pagination safety with default `limit=50`, max cap 500, default `offset=0`, negative pagination errors, total-count response checks, and frontend requests capped below 500.
 - 2026-05-04: Re-ran local CI-equivalent checks for backend tests, frontend build, diff hygiene, generated-file status, search defaults, no-results UI, and docs alignment.
 - 2026-05-04: Added v0.5.0 scan history with `/scan-sessions` elapsed-time and limit support plus a dashboard history table with rerun/resume actions.
+- 2026-05-04: Tightened scan history resume actions so the frontend only shows Resume for failed or interrupted scans.
