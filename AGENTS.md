@@ -35,6 +35,8 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 
 - The backend creates tables at startup with `Base.metadata.create_all(bind=engine)` for now.
 - The default SQLite database path is always the repo-root `image_insight.db`; tests override it with `IMAGE_INSIGHT_DATABASE_URL`.
+- `/photos/search` is a read-only SQLite query over the existing `photos` table with optional metadata filters and paginated `total_count`/`results` output.
+- `/photos/search` defaults to `limit=50`, caps requested limits at 500, defaults `offset=0`, and validates date/focal-length/pagination ranges with clean 400 responses.
 - `POST /scan-folder` starts a lightweight background scan thread and returns `scan_id` quickly.
 - `/scan-status/{scan_id}` returns persisted scan counters and elapsed time for polling.
 - Background scan threads upsert photos by unique `path` and update the existing SQLite scan session rows.

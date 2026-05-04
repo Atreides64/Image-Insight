@@ -79,6 +79,7 @@ h2 {
 .state-message,
 .error-panel,
 .scan-section,
+.search-section,
 .stat-card,
 .chart-section,
 .table-section {
@@ -108,6 +109,12 @@ h2 {
   overflow: hidden;
 }
 
+.search-section {
+  border-radius: 8px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
 .scan-heading {
   align-items: flex-start;
 }
@@ -122,11 +129,24 @@ h2 {
   padding: 22px;
 }
 
-.scan-form label {
+.search-form {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
+  gap: 12px;
+  padding: 22px;
+}
+
+.scan-form label,
+.search-form label {
   color: #a7b3c6;
   font-size: 0.88rem;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.search-form label {
+  display: grid;
+  gap: 8px;
 }
 
 .scan-controls {
@@ -135,7 +155,8 @@ h2 {
   gap: 12px;
 }
 
-.scan-controls input {
+.scan-controls input,
+.search-form input {
   min-width: 0;
   border: 1px solid #314055;
   border-radius: 8px;
@@ -145,16 +166,19 @@ h2 {
   outline: none;
 }
 
-.scan-controls input:focus {
+.scan-controls input:focus,
+.search-form input:focus {
   border-color: #6fd3b8;
   box-shadow: 0 0 0 3px rgba(111, 211, 184, 0.14);
 }
 
-.scan-controls input:disabled {
+.scan-controls input:disabled,
+.search-form input:disabled {
   color: #7f8da1;
 }
 
-.scan-controls button {
+.scan-controls button,
+.search-form button {
   min-width: 116px;
   border: 0;
   border-radius: 8px;
@@ -165,10 +189,31 @@ h2 {
   cursor: pointer;
 }
 
-.scan-controls button:disabled {
+.scan-controls button:disabled,
+.search-form button:disabled {
   color: #5d6b7f;
   background: #273244;
   cursor: not-allowed;
+}
+
+.search-form button {
+  align-self: end;
+}
+
+.search-results {
+  border-top: 1px solid #273244;
+}
+
+.search-results-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 22px;
+  color: #a7b3c6;
+}
+
+.search-results-summary strong {
+  color: #edf5ff;
 }
 
 .scan-feedback {
@@ -427,6 +472,10 @@ td:first-child {
   .scan-live-panel {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .search-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
@@ -447,8 +496,13 @@ td:first-child {
     grid-template-columns: 1fr;
   }
 
-  .scan-controls button {
+  .scan-controls button,
+  .search-form button {
     width: 100%;
+  }
+
+  .search-form {
+    grid-template-columns: 1fr;
   }
 
   .scan-live-panel {

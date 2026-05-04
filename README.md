@@ -110,6 +110,30 @@ Stats are available from `GET /stats` and include:
 - Photos by year and month
 - Busiest capture date when EXIF dates are available
 
+Search indexed photo metadata with `GET /photos/search`. Filters are optional
+and can be combined:
+
+- `camera_model`
+- `lens_model`
+- `min_focal_length`
+- `max_focal_length`
+- `date_from`
+- `date_to`
+- `extension`
+- `limit`
+- `offset`
+
+Example:
+
+```bash
+curl "http://127.0.0.1:8000/photos/search?camera_model=EOS&min_focal_length=24&max_focal_length=85"
+```
+
+The response includes `total_count`, `limit`, `offset`, and `results` for
+simple pagination. Search defaults to `limit=50` and `offset=0`; requested
+limits above 500 are capped at 500, and negative pagination values return a
+clean `400` response.
+
 Then open:
 
 - API health check: `http://127.0.0.1:8000/health`
@@ -151,5 +175,5 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 ## Status
 
-v0.3.0 adds lightweight background scan jobs and live dashboard progress.
-Search, duplicates, maps, and external job services remain future work.
+v0.4.0 adds metadata search and filtering for indexed photos. Duplicates, maps,
+and external job services remain future work.

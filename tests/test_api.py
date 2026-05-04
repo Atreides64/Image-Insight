@@ -220,6 +220,158 @@ def test_scan_folder_extracts_exif_and_stats(tmp_path: Path) -> None:
     assert stats_data["busiest_date"] == {"label": "2024-07-14", "count": 1}
 
 
+def test_search_photos_filters_metadata(tmp_path: Path) -> None:
+    with SessionLocal() as session:
+        photos = [
+            Photo(
+                filename="canon-wide.jpg",
+                path=str(tmp_path / "canon-wide.jpg"),
+                extension="jpg",
+                size_bytes=100,
+                modified_at=datetime(2024, 1, 10, tzinfo=timezone.utc),
+                scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                camera_make="Canon",
+                camera_model="EOS R5",
+                lens_model="RF24-70mm F2.8",
+                focal_length=24.0,
+                iso=100,
+                aperture=2.8,
+                shutter_speed="1/250s",
+                date_taken=datetime(2024, 1, 10, 9, 0, tzinfo=timezone.utc),
+            ),
+            Photo(
+                filename="canon-portrait.jpg",
+                path=str(tmp_path / "canon-portrait.jpg"),
+                extension="jpg",
+                size_bytes=120,
+                modified_at=datetime(2024, 2, 15, tzinfo=timezone.utc),
+                scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                camera_make="Canon",
+                camera_model="EOS R5",
+                lens_model="RF85mm F2",
+                focal_length=85.0,
+                iso=200,
+                aperture=2.0,
+                shutter_speed="1/125s",
+                date_taken=datetime(2024, 2, 15, 11, 30, tzinfo=timezone.utc),
+            ),
+            Photo(
+                filename="fuji-street.png",
+                path=str(tmp_path / "fuji-street.png"),
+                extension="png",
+                size_bytes=140,
+                modified_at=datetime(2023, 8, 1, tzinfo=timezone.utc),
+                scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                camera_make="Fujifilm",
+                camera_model="X-T5",
+                lens_model=None,
+                focal_length=None,
+                iso=None,
+                aperture=None,
+                shutter_speed=None,
+                date_taken=None,
+            ),
+        ]
+        session.add_all(photos)
+        session.commit()
+
+    response = client.get(
+        "/photos/search",
+        params={
+            "camera_model": "eos",
+            "lens_model": "rf",
+            "min_focal_length": 20,
+            "max_focal_length": 50,
+            "date_from": "2024-01-01",
+            "date_to": "2024-01-31",
+            "extension": ".jpg",
+        },
+    )
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["total_count"] == 1
+    assert data["limit"] == 50
+    assert data["offset"] == 0
+    assert [photo["filename"] for photo in data["results"]] == ["canon-wide.jpg"]
+
+    lens_response = client.get(
+        "/photos/search",
+        params={"lens_model": "rf", "limit": 1, "offset": 1},
+    )
+    lens_data = lens_response.json()
+
+    assert lens_response.status_code == 200
+    assert lens_data["total_count"] >= 2
+    assert lens_data["limit"] == 1
+    assert lens_data["offset"] == 1
+    assert len(lens_data["results"]) == 1
+
+    null_safe_response = client.get(
+        "/photos/search",
+        params={"min_focal_length": 20, "max_focal_length": 90},
+    )
+    null_safe_data = null_safe_response.json()
+    returned_paths = {photo["path"] for photo in null_safe_data["results"]}
+
+    assert null_safe_response.status_code == 200
+    assert str(tmp_path / "fuji-street.png") not in returned_paths
+
+
+def test_search_photos_pagination_defaults_and_caps() -> None:
+    default_response = client.get("/photos/search")
+    capped_response = client.get(
+        "/photos/search",
+        params={"limit": 999},
+    )
+
+    default_data = default_response.json()
+    capped_data = capped_response.json()
+
+    assert default_response.status_code == 200
+    assert set(default_data) == {"total_count", "limit", "offset", "results"}
+    assert default_data["limit"] == 50
+    assert default_data["offset"] == 0
+    assert isinstance(default_data["total_count"], int)
+    assert len(default_data["results"]) <= 50
+    assert capped_response.status_code == 200
+    assert capped_data["limit"] == 500
+    assert capped_data["offset"] == 0
+    assert len(capped_data["results"]) <= 500
+
+
+def test_search_photos_rejects_invalid_ranges_and_negative_pagination() -> None:
+    focal_response = client.get(
+        "/photos/search",
+        params={"min_focal_length": 100, "max_focal_length": 50},
+    )
+    date_response = client.get(
+        "/photos/search",
+        params={"date_from": "2024-02-01", "date_to": "2024-01-01"},
+    )
+    invalid_date_response = client.get(
+        "/photos/search",
+        params={"date_from": "not-a-date"},
+    )
+    negative_limit_response = client.get(
+        "/photos/search",
+        params={"limit": -1},
+    )
+    negative_offset_response = client.get(
+        "/photos/search",
+        params={"offset": -1},
+    )
+
+    assert focal_response.status_code == 400
+    assert date_response.status_code == 400
+    assert invalid_date_response.status_code == 400
+    assert invalid_date_response.json()["detail"] == "Invalid date value: not-a-date"
+    assert negative_limit_response.status_code == 400
+    assert negative_limit_response.json()["detail"] == "limit must be 1 or greater"
+    assert negative_offset_response.status_code == 400
+    assert negative_offset_response.json()["detail"] == "offset must be 0 or greater"
+
+
 def test_failed_scan_session_can_be_resumed(tmp_path: Path, monkeypatch) -> None:
     first_image = tmp_path / "first.jpg"
     second_image = tmp_path / "second.jpg"

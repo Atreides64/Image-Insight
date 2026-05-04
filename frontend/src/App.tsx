@@ -31,6 +31,33 @@ type Stats = {
   oldest_modified_at: string | null;
 };
 
+type PhotoSearchResult = {
+  id: number;
+  filename: string;
+  path: string;
+  extension: string;
+  camera_model: string | null;
+  lens_model: string | null;
+  focal_length: number | null;
+  date_taken: string | null;
+};
+
+type PhotoSearchResponse = {
+  total_count: number;
+  limit: number;
+  offset: number;
+  results: PhotoSearchResult[];
+};
+
+type PhotoSearchFilters = {
+  camera_model: string;
+  lens_model: string;
+  min_focal_length: string;
+  max_focal_length: string;
+  date_from: string;
+  date_to: string;
+};
+
 type ScanStartResult = {
   scan_id: number;
   status: string;
@@ -70,6 +97,7 @@ type ScanStatus = {
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted"];
+const PHOTO_SEARCH_LIMIT = 25;
 
 function formatBytes(bytes: number): string {
   return new Intl.NumberFormat("en-US").format(bytes);
@@ -98,6 +126,18 @@ function formatCalendarDate(value: string | null): string {
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
   }).format(new Date(`${value}T00:00:00`));
+}
+
+function formatOptional(value: string | number | null): string {
+  if (value === null || value === "") {
+    return "—";
+  }
+
+  return String(value);
+}
+
+function formatFocalLength(value: number | null): string {
+  return value === null ? "—" : `${value}mm`;
 }
 
 function topLabel(rows: CountRow[]): string {
@@ -134,6 +174,17 @@ function App() {
   const [lastScanSession, setLastScanSession] = useState<ScanSession | null>(null);
   const [activeScanId, setActiveScanId] = useState<number | null>(null);
   const [activeScanStatus, setActiveScanStatus] = useState<ScanStatus | null>(null);
+  const [photoSearchFilters, setPhotoSearchFilters] = useState<PhotoSearchFilters>({
+    camera_model: "",
+    lens_model: "",
+    min_focal_length: "",
+    max_focal_length: "",
+    date_from: "",
+    date_to: "",
+  });
+  const [photoSearch, setPhotoSearch] = useState<PhotoSearchResponse | null>(null);
+  const [isSearchingPhotos, setIsSearchingPhotos] = useState(false);
+  const [photoSearchError, setPhotoSearchError] = useState<string | null>(null);
 
   const loadStats = useCallback(async () => {
     try {
@@ -180,6 +231,49 @@ function App() {
       return null;
     }
   }, []);
+
+  const runPhotoSearch = useCallback(async () => {
+    const params = new URLSearchParams({
+      limit: String(Math.min(PHOTO_SEARCH_LIMIT, 500)),
+      offset: "0",
+    });
+
+    Object.entries(photoSearchFilters).forEach(([key, value]) => {
+      const trimmedValue = value.trim();
+
+      if (trimmedValue) {
+        params.set(key, trimmedValue);
+      }
+    });
+
+    setIsSearchingPhotos(true);
+    setPhotoSearchError(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/photos/search?${params}`);
+
+      if (!response.ok) {
+        let message = `Photo search failed with ${response.status}`;
+
+        try {
+          const errorBody = await response.json();
+          message = errorBody.detail ?? message;
+        } catch {
+          // Keep the status-based message if the backend response is not JSON.
+        }
+
+        throw new Error(message);
+      }
+
+      setPhotoSearch((await response.json()) as PhotoSearchResponse);
+    } catch (caughtError) {
+      setPhotoSearchError(
+        caughtError instanceof Error ? caughtError.message : "Unable to search photos.",
+      );
+    } finally {
+      setIsSearchingPhotos(false);
+    }
+  }, [photoSearchFilters]);
 
   useEffect(() => {
     loadStats();
@@ -311,6 +405,21 @@ function App() {
   async function handleScanSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await runScan({ resume: false });
+  }
+
+  async function handlePhotoSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runPhotoSearch();
+  }
+
+  function updatePhotoSearchFilter(
+    key: keyof PhotoSearchFilters,
+    value: string,
+  ) {
+    setPhotoSearchFilters((currentFilters) => ({
+      ...currentFilters,
+      [key]: value,
+    }));
   }
 
   const fileTypeRows = useMemo(() => {
@@ -458,6 +567,130 @@ function App() {
 
         {scanMessage && <p className="scan-feedback success">{scanMessage}</p>}
         {scanError && <p className="scan-feedback failure">{scanError}</p>}
+      </section>
+
+      <section className="search-section" aria-labelledby="photo-search-heading">
+        <div className="section-heading scan-heading">
+          <div>
+            <h2 id="photo-search-heading">Metadata Search</h2>
+            <span>Filter indexed photos by EXIF metadata</span>
+          </div>
+        </div>
+
+        <form className="search-form" onSubmit={handlePhotoSearchSubmit}>
+          <label>
+            Camera
+            <input
+              type="text"
+              value={photoSearchFilters.camera_model}
+              onChange={(event) =>
+                updatePhotoSearchFilter("camera_model", event.target.value)
+              }
+              placeholder="EOS R5"
+            />
+          </label>
+          <label>
+            Lens
+            <input
+              type="text"
+              value={photoSearchFilters.lens_model}
+              onChange={(event) =>
+                updatePhotoSearchFilter("lens_model", event.target.value)
+              }
+              placeholder="RF50"
+            />
+          </label>
+          <label>
+            Min Focal
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={photoSearchFilters.min_focal_length}
+              onChange={(event) =>
+                updatePhotoSearchFilter("min_focal_length", event.target.value)
+              }
+              placeholder="24"
+            />
+          </label>
+          <label>
+            Max Focal
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={photoSearchFilters.max_focal_length}
+              onChange={(event) =>
+                updatePhotoSearchFilter("max_focal_length", event.target.value)
+              }
+              placeholder="85"
+            />
+          </label>
+          <label>
+            From
+            <input
+              type="date"
+              value={photoSearchFilters.date_from}
+              onChange={(event) =>
+                updatePhotoSearchFilter("date_from", event.target.value)
+              }
+            />
+          </label>
+          <label>
+            To
+            <input
+              type="date"
+              value={photoSearchFilters.date_to}
+              onChange={(event) =>
+                updatePhotoSearchFilter("date_to", event.target.value)
+              }
+            />
+          </label>
+          <button type="submit" disabled={isSearchingPhotos}>
+            {isSearchingPhotos ? "Searching..." : "Search"}
+          </button>
+        </form>
+
+        {photoSearchError && (
+          <p className="scan-feedback failure">{photoSearchError}</p>
+        )}
+
+        {photoSearch && (
+          <div className="search-results">
+            <div className="search-results-summary">
+              <strong>{photoSearch.total_count.toLocaleString()} matches</strong>
+              <span>Showing {photoSearch.results.length.toLocaleString()}</span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Camera</th>
+                  <th>Lens</th>
+                  <th>Focal</th>
+                  <th>Date Taken</th>
+                </tr>
+              </thead>
+              <tbody>
+                {photoSearch.results.length > 0 ? (
+                  photoSearch.results.map((photo) => (
+                    <tr key={photo.id}>
+                      <td>{photo.filename}</td>
+                      <td>{formatOptional(photo.camera_model)}</td>
+                      <td>{formatOptional(photo.lens_model)}</td>
+                      <td>{formatFocalLength(photo.focal_length)}</td>
+                      <td>{formatDate(photo.date_taken)}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5}>No matching photos.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {stats && (
