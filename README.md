@@ -224,12 +224,21 @@ To point it somewhere else, create `frontend/.env.local`:
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-The dashboard includes a local "Customize Dashboard" panel. Users can toggle
+The dashboard is organized around a branded header, quick shortcuts, an
+Insights section, and focused tool cards. Scan Library combines new scans,
+metadata refreshes, cancellation, resume/rerun actions, and collapsible scan
+history. Metadata Search stays as a separate tool. If a folder has already been
+scanned, the dashboard asks the user to choose Refresh metadata, Scan anyway, or
+Cancel before starting another scan.
+
+The local "Customize Dashboard" panel lives under Settings. Users can toggle
 individual cards, charts, search/history sections, and the file type table, and
-those preferences are saved in browser `localStorage` on that device.
+those preferences are saved in browser `localStorage` on that device. The
+capture timeline is labeled "Capture Timeline where available" because imported
+or exported archives may carry added/export dates instead of true capture dates.
 
 ## Status
 
-v0.7.0 tightens the dashboard layout, adds per-card and per-section
-customization, and adds a richer photo timeline insight chart. Duplicates, maps,
-open-in-folder, previews, and external job services remain future work.
+v1.0 polish focuses on a cleaner blue/cyan/violet dashboard, safer rescan
+choices, consolidated scan tooling, and clearer timeline labeling. Duplicates,
+maps, open-in-folder, previews, and external job services remain future work.

@@ -135,6 +135,8 @@ type ScanStatus = {
   last_error: string | null;
 };
 
+type ActiveTool = "scan" | "search" | null;
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted", "cancelled"];
@@ -365,6 +367,10 @@ function App() {
   const [photoSearch, setPhotoSearch] = useState<PhotoSearchResponse | null>(null);
   const [isSearchingPhotos, setIsSearchingPhotos] = useState(false);
   const [photoSearchError, setPhotoSearchError] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [activeTool, setActiveTool] = useState<ActiveTool>(null);
+  const [isScanHistoryOpen, setIsScanHistoryOpen] = useState(false);
+  const [pendingRescanPath, setPendingRescanPath] = useState<string | null>(null);
 
   const loadStats = useCallback(async () => {
     try {
@@ -581,12 +587,17 @@ function App() {
 
   async function runScan({
     resume,
+    confirmRescan = false,
+    forceMetadataOverride,
     targetFolderPath,
   }: {
     resume: boolean;
+    confirmRescan?: boolean;
+    forceMetadataOverride?: boolean;
     targetFolderPath?: string;
   }) {
     const trimmedPath = (targetFolderPath ?? folderPath).trim();
+    const forceMetadata = forceMetadataOverride ?? refreshMetadata;
 
     if (!trimmedPath) {
       setScanError("Enter a folder path to scan.");
@@ -594,13 +605,21 @@ function App() {
       return;
     }
 
+    if (!resume && !confirmRescan && isPreviouslyScannedPath(trimmedPath)) {
+      setPendingRescanPath(trimmedPath);
+      setScanError(null);
+      setScanMessage(null);
+      return;
+    }
+
+    setPendingRescanPath(null);
     setIsScanning(true);
     setScanError(null);
     setScanMessage(null);
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/scan-folder?folder_path=${encodeURIComponent(trimmedPath)}&resume=${resume}&force_metadata=${refreshMetadata}`,
+        `${API_BASE_URL}/scan-folder?folder_path=${encodeURIComponent(trimmedPath)}&resume=${resume}&force_metadata=${forceMetadata}`,
         { method: "POST" },
       );
 
@@ -624,7 +643,7 @@ function App() {
       setScanMessage(
         resume
           ? `Resume started for ${result.folder_path}.`
-          : refreshMetadata
+          : forceMetadata
             ? `Metadata refresh started for ${result.folder_path}.`
           : `Scan started for ${result.folder_path}.`,
       );
@@ -697,6 +716,69 @@ function App() {
     }));
   }
 
+  function toggleTool(tool: Exclude<ActiveTool, null>) {
+    setActiveTool((currentTool) => (currentTool === tool ? null : tool));
+  }
+
+  function normalizePath(value: string): string {
+    return value.trim().replace(/[/\\]+$/, "").toLocaleLowerCase();
+  }
+
+  function isPreviouslyScannedPath(value: string): boolean {
+    const normalizedValue = normalizePath(value);
+
+    if (
+      lastScanSession &&
+      normalizePath(lastScanSession.folder_path) === normalizedValue
+    ) {
+      return true;
+    }
+
+    return scanHistory.some(
+      (scanSession) => normalizePath(scanSession.folder_path) === normalizedValue,
+    );
+  }
+
+  function openShortcut(target: "scan" | "search" | "insights" | "settings") {
+    if (target === "scan" || target === "search") {
+      setActiveTool(target);
+      setIsSettingsOpen(false);
+      window.setTimeout(
+        () =>
+          document
+            .getElementById(
+              `${target === "scan" ? "scan-library" : "photo-search"}-panel`,
+            )
+            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        0,
+      );
+      return;
+    }
+
+    if (target === "settings") {
+      setIsSettingsOpen(true);
+      setActiveTool(null);
+      window.setTimeout(
+        () =>
+          document
+            .getElementById("dashboard-settings")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        0,
+      );
+      return;
+    }
+
+    setActiveTool(null);
+    setIsSettingsOpen(false);
+    window.setTimeout(
+      () =>
+        document
+          .getElementById("insights-section")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      0,
+    );
+  }
+
   const fileTypeRows = useMemo(() => {
     if (!stats) {
       return [];
@@ -751,6 +833,8 @@ function App() {
     dashboardPreferences.showMetadataSearchSection,
     dashboardPreferences.showFileTypeTable,
   ].filter(Boolean).length;
+  const hasInsightData = stats !== null && stats.total_photos > 0;
+  const hasNoPhotoData = stats !== null && stats.total_photos === 0;
 
   const canResumeLastScan =
     lastScanSession !== null &&
@@ -763,11 +847,35 @@ function App() {
     <main className="app-shell">
       <section className="page-header">
         <div>
-          <p className="eyebrow">Image Insight</p>
-          <h1>Photo Library Dashboard</h1>
+          <p className="eyebrow">v1.0 local metadata intelligence</p>
+          <h1>IMAGE INSIGHT</h1>
+          <p className="page-subtitle">
+            Scan local photo folders, inspect metadata, and monitor your library.
+          </p>
         </div>
-        <span className="status-pill">FastAPI / SQLite</span>
+        <button
+          type="button"
+          className="settings-button"
+          onClick={() => setIsSettingsOpen((currentValue) => !currentValue)}
+        >
+          {isSettingsOpen ? "Close Settings" : "Settings"}
+        </button>
       </section>
+
+      <nav className="quick-tools" aria-label="Dashboard shortcuts">
+        <button type="button" onClick={() => openShortcut("scan")}>
+          Scan Library
+        </button>
+        <button type="button" onClick={() => openShortcut("search")}>
+          Metadata Search
+        </button>
+        <button type="button" onClick={() => openShortcut("insights")}>
+          Insights
+        </button>
+        <button type="button" onClick={() => openShortcut("settings")}>
+          Settings
+        </button>
+      </nav>
 
       {isLoading && <p className="state-message">Loading dashboard...</p>}
 
@@ -778,186 +886,503 @@ function App() {
         </div>
       )}
 
-      {systemInfo && (
-        <section className="system-info-panel" aria-labelledby="system-info-heading">
-          <div className="section-heading">
-            <h2 id="system-info-heading">System Info</h2>
-            <span>v{systemInfo.app_version}</span>
-          </div>
-          <dl className="system-info-grid">
-            <div>
-              <dt>Database</dt>
-              <dd>{systemInfo.database_path}</dd>
+      {isSettingsOpen && (
+        <section
+          id="dashboard-settings"
+          className="settings-panel"
+          aria-label="Dashboard settings"
+        >
+          {systemInfo && (
+            <section className="system-info-panel" aria-labelledby="system-info-heading">
+              <div className="section-heading">
+                <h2 id="system-info-heading">System Info</h2>
+                <span>v{systemInfo.app_version}</span>
+              </div>
+              <dl className="system-info-grid">
+                <div>
+                  <dt>Database</dt>
+                  <dd>{systemInfo.database_path}</dd>
+                </div>
+                <div>
+                  <dt>Photos</dt>
+                  <dd>{systemInfo.photo_count.toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt>Scan sessions</dt>
+                  <dd>{systemInfo.scan_session_count.toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt>ExifTool</dt>
+                  <dd>
+                    {systemInfo.exiftool_available ? "Detected" : "Not detected"}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          )}
+
+          <section className="customize-section" aria-labelledby="customize-heading">
+            <div className="section-heading">
+              <h2 id="customize-heading">Customize Dashboard</h2>
+              <span>{visibleCardCount + visibleInsightCount} visible items</span>
             </div>
-            <div>
-              <dt>Photos</dt>
-              <dd>{systemInfo.photo_count.toLocaleString()}</dd>
+            <div className="customize-grid">
+              <div className="customize-group">
+                <strong>Cards</strong>
+                <div className="customize-controls">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showTotalPhotosCard}
+                      onChange={() =>
+                        updateDashboardPreference("showTotalPhotosCard")
+                      }
+                    />
+                    Total photos
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showTotalSizeCard}
+                      onChange={() =>
+                        updateDashboardPreference("showTotalSizeCard")
+                      }
+                    />
+                    Total size
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showNewestDateCard}
+                      onChange={() =>
+                        updateDashboardPreference("showNewestDateCard")
+                      }
+                    />
+                    Newest date
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showOldestDateCard}
+                      onChange={() =>
+                        updateDashboardPreference("showOldestDateCard")
+                      }
+                    />
+                    Oldest date
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showFavoriteCameraCard}
+                      onChange={() =>
+                        updateDashboardPreference("showFavoriteCameraCard")
+                      }
+                    />
+                    Favorite camera
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showFavoriteLensCard}
+                      onChange={() =>
+                        updateDashboardPreference("showFavoriteLensCard")
+                      }
+                    />
+                    Favorite lens
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showFocalLengthCard}
+                      onChange={() =>
+                        updateDashboardPreference("showFocalLengthCard")
+                      }
+                    />
+                    Focal length
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showBusiestDateCard}
+                      onChange={() =>
+                        updateDashboardPreference("showBusiestDateCard")
+                      }
+                    />
+                    Busiest date
+                  </label>
+                </div>
+              </div>
+              <div className="customize-group">
+                <strong>Sections</strong>
+                <div className="customize-controls">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showCameraChart}
+                      onChange={() => updateDashboardPreference("showCameraChart")}
+                    />
+                    Camera chart
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showLensChart}
+                      onChange={() => updateDashboardPreference("showLensChart")}
+                    />
+                    Lens chart
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showTimelineChart}
+                      onChange={() =>
+                        updateDashboardPreference("showTimelineChart")
+                      }
+                    />
+                    Timeline insight
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showFileTypeChart}
+                      onChange={() =>
+                        updateDashboardPreference("showFileTypeChart")
+                      }
+                    />
+                    File type chart
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showScanHistorySection}
+                      onChange={() =>
+                        updateDashboardPreference("showScanHistorySection")
+                      }
+                    />
+                    Scan history
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showMetadataSearchSection}
+                      onChange={() =>
+                        updateDashboardPreference("showMetadataSearchSection")
+                      }
+                    />
+                    Metadata search
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={dashboardPreferences.showFileTypeTable}
+                      onChange={() =>
+                        updateDashboardPreference("showFileTypeTable")
+                      }
+                    />
+                    File type table
+                  </label>
+                </div>
+              </div>
             </div>
-            <div>
-              <dt>Scan sessions</dt>
-              <dd>{systemInfo.scan_session_count.toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt>ExifTool</dt>
-              <dd>{systemInfo.exiftool_available ? "Detected" : "Not detected"}</dd>
-            </div>
-          </dl>
+          </section>
         </section>
       )}
 
-      <section className="customize-section" aria-labelledby="customize-heading">
-        <div className="section-heading">
-          <h2 id="customize-heading">Customize Dashboard</h2>
-          <span>{visibleCardCount + visibleInsightCount} visible items</span>
-        </div>
-        <div className="customize-grid">
-          <div className="customize-group">
-            <strong>Cards</strong>
-            <div className="customize-controls">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showTotalPhotosCard}
-                  onChange={() => updateDashboardPreference("showTotalPhotosCard")}
-                />
-                Total photos
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showTotalSizeCard}
-                  onChange={() => updateDashboardPreference("showTotalSizeCard")}
-                />
-                Total size
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showNewestDateCard}
-                  onChange={() => updateDashboardPreference("showNewestDateCard")}
-                />
-                Newest date
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showOldestDateCard}
-                  onChange={() => updateDashboardPreference("showOldestDateCard")}
-                />
-                Oldest date
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showFavoriteCameraCard}
-                  onChange={() =>
-                    updateDashboardPreference("showFavoriteCameraCard")
-                  }
-                />
-                Favorite camera
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showFavoriteLensCard}
-                  onChange={() => updateDashboardPreference("showFavoriteLensCard")}
-                />
-                Favorite lens
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showFocalLengthCard}
-                  onChange={() => updateDashboardPreference("showFocalLengthCard")}
-                />
-                Focal length
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showBusiestDateCard}
-                  onChange={() => updateDashboardPreference("showBusiestDateCard")}
-                />
-                Busiest date
-              </label>
+      {hasInsightData && stats && (
+        <section
+          id="insights-section"
+          className="dashboard-section insights-section"
+          aria-labelledby="insights-heading"
+        >
+          <div className="dashboard-section-heading">
+            <div>
+              <h2 id="insights-heading">Insights</h2>
+              <span>Stats and charts from indexed photos</span>
             </div>
           </div>
-          <div className="customize-group">
-            <strong>Sections</strong>
-            <div className="customize-controls">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showCameraChart}
-                  onChange={() => updateDashboardPreference("showCameraChart")}
-                />
-                Camera chart
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showLensChart}
-                  onChange={() => updateDashboardPreference("showLensChart")}
-                />
-                Lens chart
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showTimelineChart}
-                  onChange={() => updateDashboardPreference("showTimelineChart")}
-                />
-                Timeline insight
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showFileTypeChart}
-                  onChange={() => updateDashboardPreference("showFileTypeChart")}
-                />
-                File type chart
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showScanHistorySection}
-                  onChange={() =>
-                    updateDashboardPreference("showScanHistorySection")
-                  }
-                />
-                Scan history
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showMetadataSearchSection}
-                  onChange={() =>
-                    updateDashboardPreference("showMetadataSearchSection")
-                  }
-                />
-                Metadata search
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dashboardPreferences.showFileTypeTable}
-                  onChange={() => updateDashboardPreference("showFileTypeTable")}
-                />
-                File type table
-              </label>
+
+          {showAnyStatCard && (
+            <section className="stats-grid" aria-label="Photo library stats">
+              {dashboardPreferences.showTotalPhotosCard && (
+                <article className="stat-card">
+                  <span>Total Photos</span>
+                  <strong>{stats.total_photos.toLocaleString()}</strong>
+                </article>
+              )}
+              {dashboardPreferences.showTotalSizeCard && (
+                <article className="stat-card">
+                  <span>Total Size</span>
+                  <strong>{formatGigabytes(stats.total_size_bytes)}</strong>
+                  <small>{formatBytes(stats.total_size_bytes)} bytes</small>
+                </article>
+              )}
+              {dashboardPreferences.showNewestDateCard && (
+                <article className="stat-card">
+                  <span>Newest Date</span>
+                  <strong>{formatDate(stats.newest_modified_at)}</strong>
+                </article>
+              )}
+              {dashboardPreferences.showOldestDateCard && (
+                <article className="stat-card">
+                  <span>Oldest Date</span>
+                  <strong>{formatDate(stats.oldest_modified_at)}</strong>
+                </article>
+              )}
+              {dashboardPreferences.showFavoriteCameraCard && (
+                <article className="stat-card">
+                  <span>Favorite Camera</span>
+                  <strong>{topLabel(stats.top_cameras)}</strong>
+                  {topCount(stats.top_cameras) && (
+                    <small>{topCount(stats.top_cameras)}</small>
+                  )}
+                </article>
+              )}
+              {dashboardPreferences.showFavoriteLensCard && (
+                <article className="stat-card">
+                  <span>Favorite Lens</span>
+                  <strong>{topLabel(stats.top_lenses)}</strong>
+                  {topCount(stats.top_lenses) && (
+                    <small>{topCount(stats.top_lenses)}</small>
+                  )}
+                </article>
+              )}
+              {dashboardPreferences.showFocalLengthCard && (
+                <article className="stat-card">
+                  <span>Most Used Focal Length</span>
+                  <strong>{topLabel(stats.top_focal_lengths)}</strong>
+                  {topCount(stats.top_focal_lengths) && (
+                    <small>{topCount(stats.top_focal_lengths)}</small>
+                  )}
+                </article>
+              )}
+              {dashboardPreferences.showBusiestDateCard && (
+                <article className="stat-card">
+                  <span>Busiest Date</span>
+                  <strong>
+                    {formatCalendarDate(stats.busiest_date?.label ?? null)}
+                  </strong>
+                  {stats.busiest_date && (
+                    <small>{stats.busiest_date.count.toLocaleString()} photos</small>
+                  )}
+                </article>
+              )}
+            </section>
+          )}
+
+          {showAnyInsightChart && (
+            <>
+              {(dashboardPreferences.showCameraChart ||
+                dashboardPreferences.showLensChart) && (
+              <div className="chart-grid">
+                {dashboardPreferences.showCameraChart && (
+                <section className="chart-section">
+                  <div className="section-heading">
+                    <h2>Camera Usage</h2>
+                    <span>{cameraChartData.length} cameras</span>
+                  </div>
+
+                  {cameraChartData.length > 0 ? (
+                    <div className="chart-frame">
+                      <ResponsiveContainer width="100%" height={280}>
+                        <BarChart data={cameraChartData}>
+                          <CartesianGrid stroke="#273244" vertical={false} />
+                          <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.1)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          <Bar dataKey="count" fill="#7dd3fc" radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="empty-chart">Run a scan with EXIF data to populate camera usage.</p>
+                  )}
+                </section>
+                )}
+
+                {dashboardPreferences.showLensChart && (
+                <section className="chart-section">
+                  <div className="section-heading">
+                    <h2>Lens Usage</h2>
+                    <span>{lensChartData.length} lenses</span>
+                  </div>
+
+                  {lensChartData.length > 0 ? (
+                    <div className="chart-frame">
+                      <ResponsiveContainer width="100%" height={280}>
+                        <BarChart data={lensChartData}>
+                          <CartesianGrid stroke="#273244" vertical={false} />
+                          <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <Tooltip cursor={{ fill: "rgba(169, 135, 255, 0.1)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          <Bar dataKey="count" fill="#8fb6ff" radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="empty-chart">Run a scan with EXIF data to populate lens usage.</p>
+                  )}
+                </section>
+                )}
+              </div>
+              )}
+
+              {dashboardPreferences.showTimelineChart &&
+                timelineChartData.length > 0 && (
+              <section className="chart-section">
+                <div className="section-heading">
+                  <div>
+                    <h2>Capture Timeline where available</h2>
+                    <span>
+                      Imported or exported archives may contain added/export dates
+                      instead of true capture dates.
+                    </span>
+                  </div>
+                  <span>{timelineChartData.length} months</span>
+                </div>
+
+                <div className="chart-frame">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <LineChart data={timelineChartData}>
+                      <CartesianGrid stroke="#273244" vertical={false} />
+                      <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                      <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                      <Tooltip content={<TimelineTooltip />} />
+                      <Line type="monotone" dataKey="count" stroke="#a987ff" strokeWidth={3} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
+              )}
+
+              {dashboardPreferences.showFileTypeChart && (
+              <section className="chart-section">
+                <div className="section-heading">
+                  <h2>File Type Distribution</h2>
+                  <span>{fileTypeRows.length} types</span>
+                </div>
+
+                {fileTypeChartData.length > 0 ? (
+                  <div className="chart-frame compact-chart">
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart data={fileTypeChartData}>
+                        <CartesianGrid stroke="#273244" vertical={false} />
+                        <XAxis dataKey="extension" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                        <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                        <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.1)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                        <Bar dataKey="count" fill="#7dd3fc" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="empty-chart">Run a scan to populate file type data.</p>
+                )}
+              </section>
+              )}
+            </>
+          )}
+
+          {dashboardPreferences.showFileTypeTable && (
+          <section className="table-section">
+            <div className="section-heading">
+              <h2>File Type Counts</h2>
+              <span>{stats.total_photos.toLocaleString()} indexed photos</span>
             </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Extension</th>
+                  <th>Count</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fileTypeRows.length > 0 ? (
+                  fileTypeRows.map(([extension, count]) => (
+                    <tr key={extension}>
+                      <td>{extension.toUpperCase()}</td>
+                      <td>{count.toLocaleString()}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={2}>No photo data yet.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+          )}
+        </section>
+      )}
+
+      <section className="dashboard-section tools-section" aria-labelledby="tools-heading">
+        <div className="dashboard-section-heading">
+          <div>
+            <h2 id="tools-heading">Tools</h2>
+            <span>Open scan or search workspaces</span>
           </div>
         </div>
+
+        {hasNoPhotoData && (
+          <div className="onboarding-empty-state">
+            <strong>Start by scanning a folder.</strong>
+            <span>
+              Image Insight needs an indexed photo folder before insights, search,
+              and scan history become useful.
+            </span>
+          </div>
+        )}
+
+        <div className="tool-card-grid">
+          <button
+            type="button"
+            className={`tool-card scan-card${activeTool === "scan" ? " active" : ""}${hasNoPhotoData ? " recommended" : ""}`}
+            onClick={() => toggleTool("scan")}
+            aria-controls="scan-library-panel"
+            aria-expanded={activeTool === "scan"}
+          >
+            <span className="tool-card-icon" aria-hidden="true" />
+            <span className="tool-card-copy">
+              <strong>Scan Library</strong>
+              <span>Run new scans, refresh metadata, and review scan history.</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`tool-card search-card${activeTool === "search" ? " active" : ""}`}
+            onClick={() => toggleTool("search")}
+            aria-controls="photo-search-panel"
+            aria-expanded={activeTool === "search"}
+          >
+            <span className="tool-card-icon" aria-hidden="true" />
+            <span className="tool-card-copy">
+              <strong>Metadata Search</strong>
+              <span>Filter indexed photos by EXIF details.</span>
+            </span>
+          </button>
+        </div>
+
+        {!activeTool && (
+          <p className="state-message">Choose a tool above to open its workspace.</p>
+        )}
       </section>
 
-      <section className="scan-section" aria-labelledby="scan-folder-heading">
+      {activeTool === "scan" && (
+      <section
+        id="scan-library-panel"
+        className="scan-section tool-detail"
+        aria-labelledby="scan-library-heading"
+      >
         <div className="section-heading scan-heading">
           <div>
-            <h2 id="scan-folder-heading">Scan Folder</h2>
-            <span>Add local image files to the dashboard database</span>
+            <h2 id="scan-library-heading">Scan Library</h2>
+            <span>Start a scan or review recent scan activity</span>
           </div>
         </div>
 
+        <div className="scan-subsection">
+          <h3>New Scan</h3>
         <form className="scan-form" onSubmit={handleScanSubmit}>
           <label htmlFor="folder-path">Local folder path</label>
           <div className="scan-controls">
@@ -983,6 +1408,54 @@ function App() {
             Refresh metadata
           </label>
         </form>
+        </div>
+
+        {pendingRescanPath && (
+          <div className="rescan-warning" role="alert">
+            <strong>This directory was previously scanned.</strong>
+            <span>
+              Choose how to continue for {pendingRescanPath}. A scan will not start
+              until you pick one of these actions.
+            </span>
+            <div className="rescan-actions">
+              <button
+                type="button"
+                onClick={() =>
+                  void runScan({
+                    resume: false,
+                    confirmRescan: true,
+                    forceMetadataOverride: true,
+                    targetFolderPath: pendingRescanPath,
+                  })
+                }
+                disabled={isScanning}
+              >
+                Refresh metadata
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void runScan({
+                    resume: false,
+                    confirmRescan: true,
+                    forceMetadataOverride: false,
+                    targetFolderPath: pendingRescanPath,
+                  })
+                }
+                disabled={isScanning}
+              >
+                Scan anyway
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setPendingRescanPath(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {lastScanSession && (
           <div className="scan-history">
@@ -1098,15 +1571,22 @@ function App() {
 
         {scanMessage && <p className="scan-feedback success">{scanMessage}</p>}
         {scanError && <p className="scan-feedback failure">{scanError}</p>}
-      </section>
 
-      {dashboardPreferences.showScanHistorySection && (
-      <section className="table-section">
-        <div className="section-heading">
-          <h2>Scan History</h2>
+        <div className="scan-history-toggle">
+          <button
+            type="button"
+            className="small-action-button"
+            onClick={() => setIsScanHistoryOpen((currentValue) => !currentValue)}
+            aria-expanded={isScanHistoryOpen}
+            aria-controls="scan-history-panel"
+          >
+            {isScanHistoryOpen ? "Hide Scan History" : "Show Scan History"}
+          </button>
           <span>{scanHistory.length.toLocaleString()} recent scans</span>
         </div>
 
+        {isScanHistoryOpen && (
+      <section id="scan-history-panel" className="table-section embedded-history">
         <table>
           <thead>
             <tr>
@@ -1145,6 +1625,7 @@ function App() {
                         onClick={() =>
                           void runScan({
                             resume: false,
+                            confirmRescan: true,
                             targetFolderPath: scanSession.folder_path,
                           })
                         }
@@ -1179,10 +1660,16 @@ function App() {
           </tbody>
         </table>
       </section>
+        )}
+      </section>
       )}
 
-      {dashboardPreferences.showMetadataSearchSection && (
-      <section className="search-section" aria-labelledby="photo-search-heading">
+      {activeTool === "search" && (
+      <section
+        id="photo-search-panel"
+        className="search-section tool-detail"
+        aria-labelledby="photo-search-heading"
+      >
         <div className="section-heading scan-heading">
           <div>
             <h2 id="photo-search-heading">Metadata Search</h2>
@@ -1305,217 +1792,6 @@ function App() {
           </div>
         )}
       </section>
-      )}
-
-      {stats && (
-        <>
-          {showAnyStatCard && (
-            <section className="stats-grid" aria-label="Photo library stats">
-              {dashboardPreferences.showTotalPhotosCard && (
-                <article className="stat-card">
-                  <span>Total Photos</span>
-                  <strong>{stats.total_photos.toLocaleString()}</strong>
-                </article>
-              )}
-              {dashboardPreferences.showTotalSizeCard && (
-                <article className="stat-card">
-                  <span>Total Size</span>
-                  <strong>{formatGigabytes(stats.total_size_bytes)}</strong>
-                  <small>{formatBytes(stats.total_size_bytes)} bytes</small>
-                </article>
-              )}
-              {dashboardPreferences.showNewestDateCard && (
-                <article className="stat-card">
-                  <span>Newest Date</span>
-                  <strong>{formatDate(stats.newest_modified_at)}</strong>
-                </article>
-              )}
-              {dashboardPreferences.showOldestDateCard && (
-                <article className="stat-card">
-                  <span>Oldest Date</span>
-                  <strong>{formatDate(stats.oldest_modified_at)}</strong>
-                </article>
-              )}
-              {dashboardPreferences.showFavoriteCameraCard && (
-                <article className="stat-card">
-                  <span>Favorite Camera</span>
-                  <strong>{topLabel(stats.top_cameras)}</strong>
-                  {topCount(stats.top_cameras) && (
-                    <small>{topCount(stats.top_cameras)}</small>
-                  )}
-                </article>
-              )}
-              {dashboardPreferences.showFavoriteLensCard && (
-                <article className="stat-card">
-                  <span>Favorite Lens</span>
-                  <strong>{topLabel(stats.top_lenses)}</strong>
-                  {topCount(stats.top_lenses) && (
-                    <small>{topCount(stats.top_lenses)}</small>
-                  )}
-                </article>
-              )}
-              {dashboardPreferences.showFocalLengthCard && (
-                <article className="stat-card">
-                  <span>Most Used Focal Length</span>
-                  <strong>{topLabel(stats.top_focal_lengths)}</strong>
-                  {topCount(stats.top_focal_lengths) && (
-                    <small>{topCount(stats.top_focal_lengths)}</small>
-                  )}
-                </article>
-              )}
-              {dashboardPreferences.showBusiestDateCard && (
-                <article className="stat-card">
-                  <span>Busiest Date</span>
-                  <strong>{formatCalendarDate(stats.busiest_date?.label ?? null)}</strong>
-                  {stats.busiest_date && (
-                    <small>{stats.busiest_date.count.toLocaleString()} photos</small>
-                  )}
-                </article>
-              )}
-            </section>
-          )}
-
-          {showAnyInsightChart && (
-            <>
-              {(dashboardPreferences.showCameraChart ||
-                dashboardPreferences.showLensChart) && (
-              <div className="chart-grid">
-                {dashboardPreferences.showCameraChart && (
-                <section className="chart-section">
-                  <div className="section-heading">
-                    <h2>Camera Usage</h2>
-                    <span>{cameraChartData.length} cameras</span>
-                  </div>
-
-                  {cameraChartData.length > 0 ? (
-                    <div className="chart-frame">
-                      <ResponsiveContainer width="100%" height={280}>
-                        <BarChart data={cameraChartData}>
-                          <CartesianGrid stroke="#273244" vertical={false} />
-                          <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <Tooltip cursor={{ fill: "rgba(111, 211, 184, 0.08)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                          <Bar dataKey="count" fill="#6fd3b8" radius={[6, 6, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  ) : (
-                    <p className="empty-chart">Run a scan with EXIF data to populate camera usage.</p>
-                  )}
-                </section>
-                )}
-
-                {dashboardPreferences.showLensChart && (
-                <section className="chart-section">
-                  <div className="section-heading">
-                    <h2>Lens Usage</h2>
-                    <span>{lensChartData.length} lenses</span>
-                  </div>
-
-                  {lensChartData.length > 0 ? (
-                    <div className="chart-frame">
-                      <ResponsiveContainer width="100%" height={280}>
-                        <BarChart data={lensChartData}>
-                          <CartesianGrid stroke="#273244" vertical={false} />
-                          <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <Tooltip cursor={{ fill: "rgba(111, 211, 184, 0.08)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                          <Bar dataKey="count" fill="#8fb6ff" radius={[6, 6, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  ) : (
-                    <p className="empty-chart">Run a scan with EXIF data to populate lens usage.</p>
-                  )}
-                </section>
-                )}
-              </div>
-              )}
-
-              {dashboardPreferences.showTimelineChart && (
-              <section className="chart-section">
-                <div className="section-heading">
-                  <h2>Photo Timeline</h2>
-                  <span>{timelineChartData.length} months</span>
-                </div>
-
-                {timelineChartData.length > 0 ? (
-                  <div className="chart-frame">
-                    <ResponsiveContainer width="100%" height={280}>
-                      <LineChart data={timelineChartData}>
-                        <CartesianGrid stroke="#273244" vertical={false} />
-                        <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                        <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                        <Tooltip content={<TimelineTooltip />} />
-                        <Line type="monotone" dataKey="count" stroke="#f0c66a" strokeWidth={3} dot={{ r: 3 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                ) : (
-                  <p className="empty-chart">Run a scan with capture dates to populate the timeline.</p>
-                )}
-              </section>
-              )}
-
-              {dashboardPreferences.showFileTypeChart && (
-              <section className="chart-section">
-                <div className="section-heading">
-                  <h2>File Type Distribution</h2>
-                  <span>{fileTypeRows.length} types</span>
-                </div>
-
-                {fileTypeChartData.length > 0 ? (
-                  <div className="chart-frame compact-chart">
-                    <ResponsiveContainer width="100%" height={240}>
-                      <BarChart data={fileTypeChartData}>
-                        <CartesianGrid stroke="#273244" vertical={false} />
-                        <XAxis dataKey="extension" stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                        <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                        <Tooltip cursor={{ fill: "rgba(111, 211, 184, 0.08)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                        <Bar dataKey="count" fill="#6fd3b8" radius={[6, 6, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                ) : (
-                  <p className="empty-chart">Run a scan to populate file type data.</p>
-                )}
-              </section>
-              )}
-            </>
-          )}
-
-          {dashboardPreferences.showFileTypeTable && (
-          <section className="table-section">
-            <div className="section-heading">
-              <h2>File Type Counts</h2>
-              <span>{stats.total_photos.toLocaleString()} indexed photos</span>
-            </div>
-
-            <table>
-              <thead>
-                <tr>
-                  <th>Extension</th>
-                  <th>Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {fileTypeRows.length > 0 ? (
-                  fileTypeRows.map(([extension, count]) => (
-                    <tr key={extension}>
-                      <td>{extension.toUpperCase()}</td>
-                      <td>{count.toLocaleString()}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={2}>No photo data yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
-          )}
-        </>
       )}
     </main>
   );
