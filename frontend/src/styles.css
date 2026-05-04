@@ -194,10 +194,19 @@ h2 {
 }
 
 .system-info-grid dd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   margin: 0;
   overflow-wrap: anywhere;
   color: #edf5ff;
   font-weight: 700;
+}
+
+.system-info-grid dd span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .scan-heading {
@@ -457,6 +466,17 @@ h2 {
 .small-action-button:disabled {
   color: #7f8da1;
   cursor: not-allowed;
+}
+
+.inline-action-button {
+  border: 1px solid #314055;
+  border-radius: 8px;
+  padding: 5px 8px;
+  color: #edf5ff;
+  background: #151e2b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .spinner {

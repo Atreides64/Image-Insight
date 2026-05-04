@@ -338,6 +338,23 @@ function formatScanSpeed(value: number | null | undefined): string {
   })} files/sec`;
 }
 
+function formatScanSummary(status: ScanStatus): string {
+  const summary = `${status.image_files_matched.toLocaleString()} matched, ${status.new_files.toLocaleString()} new, ${status.updated_files.toLocaleString()} updated, ${status.skipped_files.toLocaleString()} skipped, ${status.failed_files.toLocaleString()} failed at ${formatScanSpeed(status.scan_speed_files_per_second)}.`;
+
+  switch (status.status) {
+    case "completed":
+      return `Scan complete for ${status.folder_path}. ${summary}`;
+    case "cancelled":
+      return `Scan cancelled for ${status.folder_path}. ${summary}`;
+    case "failed":
+      return `Scan failed for ${status.folder_path}. ${status.last_error ?? summary}`;
+    case "interrupted":
+      return `Scan interrupted for ${status.folder_path}. ${status.last_error ?? summary}`;
+    default:
+      return `Scan stopped for ${status.folder_path}. ${summary}`;
+  }
+}
+
 function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
@@ -365,6 +382,8 @@ function App() {
   const [photoSearch, setPhotoSearch] = useState<PhotoSearchResponse | null>(null);
   const [isSearchingPhotos, setIsSearchingPhotos] = useState(false);
   const [photoSearchError, setPhotoSearchError] = useState<string | null>(null);
+  const [copiedDatabasePath, setCopiedDatabasePath] = useState(false);
+  const [copiedPhotoId, setCopiedPhotoId] = useState<number | null>(null);
 
   const loadStats = useCallback(async () => {
     try {
@@ -532,25 +551,12 @@ function App() {
           await loadSystemInfo();
 
           if (status.status === "completed") {
-            const failedFilesMessage =
-              status.failed_files > 0
-                ? ` ${status.failed_files.toLocaleString()} could not be read this pass.`
-                : "";
-
-            setScanMessage(
-              `Scan complete for ${status.folder_path}. ${status.image_files_matched.toLocaleString()} image files matched, ${status.new_files.toLocaleString()} new, ${status.updated_files.toLocaleString()} updated, ${status.skipped_files.toLocaleString()} skipped in ${status.elapsed_seconds.toFixed(2)}s.${failedFilesMessage}`,
-            );
+            setScanMessage(formatScanSummary(status));
             await loadStats();
           } else if (status.status === "cancelled") {
-            setScanMessage(
-              `Scan cancelled for ${status.folder_path}. ${status.image_files_matched.toLocaleString()} image files matched before it stopped.`,
-            );
+            setScanMessage(formatScanSummary(status));
           } else {
-            setScanError(
-              status.last_error
-                ? `The scan stopped before finishing. ${status.last_error}`
-                : "The scan stopped before finishing.",
-            );
+            setScanError(formatScanSummary(status));
           }
         }
       } catch (caughtError) {
@@ -697,6 +703,30 @@ function App() {
     }));
   }
 
+  async function copyDatabasePath() {
+    if (!systemInfo) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(systemInfo.database_path);
+      setCopiedDatabasePath(true);
+      window.setTimeout(() => setCopiedDatabasePath(false), 1800);
+    } catch {
+      setError("Could not copy the database path from this browser.");
+    }
+  }
+
+  async function copyPhotoPath(photo: PhotoSearchResult) {
+    try {
+      await navigator.clipboard.writeText(photo.path);
+      setCopiedPhotoId(photo.id);
+      window.setTimeout(() => setCopiedPhotoId(null), 1800);
+    } catch {
+      setPhotoSearchError("Could not copy the file path from this browser.");
+    }
+  }
+
   const fileTypeRows = useMemo(() => {
     if (!stats) {
       return [];
@@ -751,6 +781,15 @@ function App() {
     dashboardPreferences.showMetadataSearchSection,
     dashboardPreferences.showFileTypeTable,
   ].filter(Boolean).length;
+  const hasNoStatsYet = stats !== null && stats.total_photos === 0;
+  const hasNoExifData =
+    stats !== null &&
+    stats.total_photos > 0 &&
+    stats.top_cameras.length === 0 &&
+    stats.top_lenses.length === 0 &&
+    stats.top_focal_lengths.length === 0;
+  const hasNoTimelineData =
+    stats !== null && stats.total_photos > 0 && stats.photo_timeline.length === 0;
 
   const canResumeLastScan =
     lastScanSession !== null &&
@@ -787,7 +826,16 @@ function App() {
           <dl className="system-info-grid">
             <div>
               <dt>Database</dt>
-              <dd>{systemInfo.database_path}</dd>
+              <dd>
+                <span>{systemInfo.database_path}</span>
+                <button
+                  type="button"
+                  className="inline-action-button"
+                  onClick={() => void copyDatabasePath()}
+                >
+                  {copiedDatabasePath ? "Copied" : "Copy"}
+                </button>
+              </dd>
             </div>
             <div>
               <dt>Photos</dt>
@@ -1035,7 +1083,7 @@ function App() {
           <div className="scan-progress" role="status" aria-live="polite">
             <span className="spinner" aria-hidden="true" />
             <span>
-              Scanning folder in the background... dashboard updates every few seconds.
+              Scan running in the background. Progress updates every few seconds.
             </span>
             <span className="scan-progress-detail">
               {(activeScanStatus?.exiftool_available ??
@@ -1173,7 +1221,9 @@ function App() {
               ))
             ) : (
               <tr>
-                <td colSpan={7}>No scan history yet.</td>
+                <td colSpan={7}>
+                  No scan history yet. Start with a local photo folder above.
+                </td>
               </tr>
             )}
           </tbody>
@@ -1282,6 +1332,7 @@ function App() {
                   <th>Lens</th>
                   <th>Focal</th>
                   <th>Date Taken</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -1293,11 +1344,23 @@ function App() {
                       <td>{formatOptional(photo.lens_model)}</td>
                       <td>{formatFocalLength(photo.focal_length)}</td>
                       <td>{formatDate(photo.date_taken)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="small-action-button"
+                          onClick={() => void copyPhotoPath(photo)}
+                        >
+                          {copiedPhotoId === photo.id ? "Copied" : "Copy Path"}
+                        </button>
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5}>No matching photos.</td>
+                    <td colSpan={6}>
+                      No matching photos. Try clearing a filter or widening the date
+                      or focal length range.
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -1309,6 +1372,27 @@ function App() {
 
       {stats && (
         <>
+          {hasNoStatsYet && (
+            <p className="state-message">
+              No photo stats yet. Run your first scan to populate library totals,
+              EXIF insights, charts, and search results.
+            </p>
+          )}
+
+          {hasNoExifData && (
+            <p className="state-message">
+              Photos are indexed, but no camera, lens, or focal-length EXIF data
+              has been found yet.
+            </p>
+          )}
+
+          {hasNoTimelineData && (
+            <p className="state-message">
+              Timeline data is empty because indexed photos do not have capture
+              dates yet.
+            </p>
+          )}
+
           {showAnyStatCard && (
             <section className="stats-grid" aria-label="Photo library stats">
               {dashboardPreferences.showTotalPhotosCard && (
