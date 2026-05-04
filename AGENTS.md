@@ -37,8 +37,12 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - The default SQLite database path is always the repo-root `image_insight.db`; tests override it with `IMAGE_INSIGHT_DATABASE_URL`.
 - `/photos/search` is a read-only SQLite query over the existing `photos` table with optional metadata filters and paginated `total_count`/`results` output.
 - `/photos/search` defaults to `limit=50`, caps requested limits at 500, defaults `offset=0`, and validates date/focal-length/pagination ranges with clean 400 responses.
+- Image metadata extraction uses optional ExifTool JSON output first when `exiftool` is available on PATH, then falls back to Pillow; ExifTool is not required for CI or local development.
 - `POST /scan-folder` starts a lightweight background scan thread and returns `scan_id` quickly.
-- `/scan-status/{scan_id}` returns persisted scan counters and elapsed time for polling.
+- `POST /scan-folder?force_metadata=true` refreshes EXIF extraction for unchanged files and only backfills missing EXIF fields with newly populated values.
+- `/scan-status/{scan_id}` returns persisted scan counters, scan speed, force-metadata flag, ExifTool availability, elapsed time, and any last error for polling.
+- `POST /scan-sessions/{scan_id}/cancel` requests in-memory cancellation for a running scan; the scan loop persists `cancelled` as a terminal status.
+- `/system-info` returns app version, SQLite database path, indexed photo count, scan session count, and ExifTool detection for the dashboard System Info panel.
 - Background scan threads upsert photos by unique `path` and update the existing SQLite scan session rows.
 - Scan progress is printed with `print(..., flush=True)` so terminal output appears during long scans.
 - Scan counters distinguish `files_seen`, `image_files_matched`, `new_files`, `updated_files`, `skipped_files`, and `failed_files`.
@@ -46,10 +50,10 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - Long scans commit database writes every 500 matched image files so progress is visible before the full run completes.
 - Starting a duplicate running scan for the same folder returns a conflict unless `resume=true` is attaching to the existing running session.
 - The frontend fetches the backend from `VITE_API_BASE_URL`, defaulting to `http://127.0.0.1:8000`.
-- `/stats.photo_timeline` provides the dashboard's monthly date-taken insight series with photo counts plus top camera/lens labels for tooltips.
+- `/stats` includes a `photo_timeline` field with the dashboard's monthly date-taken insight series, photo counts, and top camera/lens labels for tooltips.
 - CORS is enabled for the Vite dev server on `localhost:5173` and `127.0.0.1:5173`.
 - Tests set `IMAGE_INSIGHT_DATABASE_URL` before importing the app so they use a temporary SQLite database.
-- Pytest uses repo-root imports via `pytest.ini` with `pythonpath = .`; CI also sets `PYTHONPATH=.` for the backend job.
+- pytest uses repo-root imports via `pytest.ini` with `pythonpath = .`; CI also sets `PYTHONPATH=.` for the backend job.
 - CI lives in `.github/workflows/ci.yml` with separate backend and frontend jobs for faster feedback.
 - The backend CI job installs Ubuntu `libjpeg-dev` and `zlib1g-dev` before Python dependencies so Pillow can build if a wheel is unavailable.
 - The backend CI job pins Python to 3.12.

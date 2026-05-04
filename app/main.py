@@ -1,16 +1,19 @@
+import json
+import re
+import shutil
+import subprocess
 import time
 from collections import Counter
 from datetime import datetime, time as datetime_time, timezone
 from pathlib import Path
-import re
-from threading import Thread
+from threading import Lock, Thread
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import ExifTags, Image, UnidentifiedImageError
 from sqlalchemy import func, text
 
-from app.database import Base, SessionLocal, engine
+from app.database import Base, DATABASE_URL, DEFAULT_DATABASE_PATH, SessionLocal, engine
 from app.models import Photo, ScanSession, ScanSessionFile
 
 IMAGE_EXTENSIONS = {
@@ -25,11 +28,14 @@ IMAGE_EXTENSIONS = {
 }
 BATCH_COMMIT_SIZE = 500
 RESUMABLE_SCAN_STATUSES = {"running", "interrupted", "failed"}
+CANCELLED_SCAN_IDS: set[int] = set()
+CANCELLED_SCAN_IDS_LOCK = Lock()
+APP_VERSION = "0.8.0"
 
 app = FastAPI(
     title="Image Insight API",
     description="Backend API for local-first media metadata analytics.",
-    version="0.5.0",
+    version=APP_VERSION,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -54,7 +60,21 @@ EXIF_COLUMNS = {
     "shutter_speed": "VARCHAR",
     "date_taken": "DATETIME",
 }
+SCAN_SESSION_COLUMNS = {
+    "force_metadata": "INTEGER NOT NULL DEFAULT 0",
+}
 EXIF_TAGS = {value: key for key, value in ExifTags.TAGS.items()}
+EMPTY_EXIF_METADATA = {
+    "camera_make": None,
+    "camera_model": None,
+    "lens_model": None,
+    "focal_length": None,
+    "iso": None,
+    "aperture": None,
+    "shutter_speed": None,
+    "date_taken": None,
+}
+EXIF_METADATA_KEYS = tuple(EMPTY_EXIF_METADATA)
 
 
 def ensure_photo_exif_columns() -> None:
@@ -70,12 +90,43 @@ def ensure_photo_exif_columns() -> None:
                 )
 
 
+def ensure_scan_session_columns() -> None:
+    with engine.begin() as connection:
+        existing_columns = {
+            row[1] for row in connection.execute(text("PRAGMA table_info(scan_sessions)"))
+        }
+
+        for column_name, column_type in SCAN_SESSION_COLUMNS.items():
+            if column_name not in existing_columns:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE scan_sessions ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+
+
 ensure_photo_exif_columns()
+ensure_scan_session_columns()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/system-info")
+def system_info() -> dict[str, object]:
+    with SessionLocal() as session:
+        photo_count = session.query(func.count(Photo.id)).scalar() or 0
+        scan_session_count = session.query(func.count(ScanSession.id)).scalar() or 0
+
+    return {
+        "app_version": APP_VERSION,
+        "database_path": database_path_label(),
+        "photo_count": photo_count,
+        "scan_session_count": scan_session_count,
+        "exiftool_available": is_exiftool_available(),
+    }
 
 
 def clean_exif_text(value: object) -> str | None:
@@ -213,6 +264,102 @@ def parse_lens_model(exif) -> str | None:
     return lens_specification or lens_make
 
 
+def exiftool_value(metadata: dict[str, object], *keys: str) -> object:
+    for key in keys:
+        value = metadata.get(key)
+        if value not in (None, "", "0"):
+            return value
+
+    return None
+
+
+def exiftool_lens_model(metadata: dict[str, object]) -> str | None:
+    lens_model = clean_exif_text(
+        exiftool_value(metadata, "LensModel", "LensID", "Lens", "LensType")
+    )
+    if lens_model:
+        return lens_model
+
+    lens_make = clean_exif_text(exiftool_value(metadata, "LensMake"))
+    raw_lens_specification = exiftool_value(metadata, "LensSpecification")
+    lens_specification = (
+        lens_specification_text(tuple(raw_lens_specification))
+        if isinstance(raw_lens_specification, list)
+        else lens_specification_text(raw_lens_specification)
+    )
+    lens_specification = lens_specification or clean_exif_text(
+        raw_lens_specification
+    )
+
+    if lens_make and lens_specification:
+        return f"{lens_make} {lens_specification}"
+
+    return lens_specification or lens_make
+
+
+def parse_iso(value: object) -> int | None:
+    iso_value = parse_rational_number(value)
+
+    if iso_value is None or iso_value <= 0:
+        return None
+
+    return int(round(iso_value))
+
+
+def extract_exiftool_metadata(path: Path) -> dict[str, object] | None:
+    exiftool_path = shutil.which("exiftool")
+    if exiftool_path is None:
+        return None
+
+    try:
+        result = subprocess.run(
+            [exiftool_path, "-json", "-n", str(path)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+
+    try:
+        parsed_output = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    if not isinstance(parsed_output, list) or not parsed_output:
+        return None
+
+    metadata = parsed_output[0]
+    if not isinstance(metadata, dict):
+        return None
+
+    return {
+        "camera_make": clean_exif_text(exiftool_value(metadata, "Make")),
+        "camera_model": clean_exif_text(exiftool_value(metadata, "Model")),
+        "lens_model": exiftool_lens_model(metadata),
+        "focal_length": parse_focal_length(exiftool_value(metadata, "FocalLength")),
+        "iso": parse_iso(exiftool_value(metadata, "ISO", "BaseISO")),
+        "aperture": rational_to_float(
+            exiftool_value(metadata, "FNumber", "Aperture", "ApertureValue")
+        ),
+        "shutter_speed": format_shutter_speed(
+            exiftool_value(
+                metadata,
+                "ExposureTime",
+                "ShutterSpeed",
+                "ShutterSpeedValue",
+            )
+        ),
+        "date_taken": parse_exif_datetime(
+            exiftool_value(metadata, "DateTimeOriginal", "CreateDate", "DateTime")
+        ),
+    }
+
+
 def log_unavailable_lens_metadata(
     path: Path,
     exif,
@@ -235,7 +382,7 @@ def log_unavailable_lens_metadata(
 
 
 def format_shutter_speed(value: object) -> str | None:
-    speed = rational_to_float(value)
+    speed = parse_rational_number(value)
 
     if speed is None or speed <= 0:
         return None
@@ -253,7 +400,21 @@ def parse_exif_datetime(value: object) -> datetime | None:
     if not text_value:
         return None
 
-    for date_format in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+    text_value = text_value.removesuffix("Z")
+    if re.search(r"[+-]\d{2}:\d{2}$", text_value):
+        try:
+            return normalize_datetime(datetime.fromisoformat(text_value))
+        except ValueError:
+            pass
+
+    text_value = re.sub(r"([+-]\d{2}):?(\d{2})$", "", text_value).strip()
+
+    for date_format in (
+        "%Y:%m:%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y:%m:%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S.%f",
+    ):
         try:
             return datetime.strptime(text_value, date_format).replace(
                 tzinfo=timezone.utc
@@ -301,35 +462,32 @@ def exif_value(exif, tag_name: str) -> object:
 
 
 def extract_exif_metadata(path: Path) -> dict[str, object]:
-    empty_metadata = {
-        "camera_make": None,
-        "camera_model": None,
-        "lens_model": None,
-        "focal_length": None,
-        "iso": None,
-        "aperture": None,
-        "shutter_speed": None,
-        "date_taken": None,
+    exiftool_metadata = extract_exiftool_metadata(path)
+    pillow_metadata = extract_pillow_exif_metadata(path)
+
+    if exiftool_metadata is None:
+        return pillow_metadata
+
+    return {
+        key: exiftool_metadata.get(key) or pillow_metadata.get(key)
+        for key in EMPTY_EXIF_METADATA
     }
 
+
+def extract_pillow_exif_metadata(path: Path) -> dict[str, object]:
     try:
         with Image.open(path) as image:
             exif = image.getexif()
     except (OSError, UnidentifiedImageError, ValueError):
-        return empty_metadata
+        return EMPTY_EXIF_METADATA.copy()
 
     if not exif:
-        return empty_metadata
+        return EMPTY_EXIF_METADATA.copy()
 
     iso = exif_value(exif, "ISOSpeedRatings") or exif_value(
         exif,
         "PhotographicSensitivity",
     )
-
-    try:
-        iso_value = int(iso) if iso is not None else None
-    except (TypeError, ValueError):
-        iso_value = None
 
     lens_model = parse_lens_model(exif)
     focal_length = parse_focal_length(exif_value(exif, "FocalLength"))
@@ -345,7 +503,7 @@ def extract_exif_metadata(path: Path) -> dict[str, object]:
         "camera_model": clean_exif_text(exif_value(exif, "Model")),
         "lens_model": lens_model,
         "focal_length": focal_length,
-        "iso": iso_value,
+        "iso": parse_iso(iso),
         "aperture": rational_to_float(exif_value(exif, "FNumber")),
         "shutter_speed": format_shutter_speed(exif_value(exif, "ExposureTime")),
         "date_taken": parse_exif_datetime(
@@ -354,7 +512,7 @@ def extract_exif_metadata(path: Path) -> dict[str, object]:
     }
 
 
-def build_file_metadata(path: Path) -> dict[str, object]:
+def build_basic_file_metadata(path: Path) -> dict[str, object]:
     file_stat = path.stat()
 
     return {
@@ -366,6 +524,12 @@ def build_file_metadata(path: Path) -> dict[str, object]:
             file_stat.st_mtime,
             tz=timezone.utc,
         ),
+    }
+
+
+def build_file_metadata(path: Path) -> dict[str, object]:
+    return {
+        **build_basic_file_metadata(path),
         **extract_exif_metadata(path),
     }
 
@@ -430,6 +594,26 @@ def calculate_elapsed_seconds(scan_session: ScanSession) -> float:
     )
 
 
+def calculate_scan_speed(scan_session: ScanSession) -> float:
+    elapsed_seconds = calculate_elapsed_seconds(scan_session)
+
+    if elapsed_seconds <= 0:
+        return 0
+
+    return round(scan_session.files_seen / elapsed_seconds, 2)
+
+
+def is_exiftool_available() -> bool:
+    return shutil.which("exiftool") is not None
+
+
+def database_path_label() -> str:
+    if DATABASE_URL.startswith("sqlite:///"):
+        return DATABASE_URL.removeprefix("sqlite:///")
+
+    return str(DEFAULT_DATABASE_PATH)
+
+
 def format_scan_session(scan_session: ScanSession) -> dict[str, object]:
     return {
         "scan_id": scan_session.id,
@@ -448,6 +632,9 @@ def format_scan_session(scan_session: ScanSession) -> dict[str, object]:
         "skipped_files": scan_session.skipped_files,
         "failed_files": scan_session.failed_files,
         "elapsed_seconds": calculate_elapsed_seconds(scan_session),
+        "scan_speed_files_per_second": calculate_scan_speed(scan_session),
+        "force_metadata": bool(scan_session.force_metadata),
+        "exiftool_available": is_exiftool_available(),
         "last_error": scan_session.last_error,
     }
 
@@ -464,6 +651,9 @@ def format_scan_status(scan_session: ScanSession) -> dict[str, object]:
         "skipped_files": scan_session.skipped_files,
         "failed_files": scan_session.failed_files,
         "elapsed_seconds": calculate_elapsed_seconds(scan_session),
+        "scan_speed_files_per_second": calculate_scan_speed(scan_session),
+        "force_metadata": bool(scan_session.force_metadata),
+        "exiftool_available": is_exiftool_available(),
         "last_error": scan_session.last_error,
     }
 
@@ -496,6 +686,45 @@ def metadata_values_changed(photo: Photo, metadata: dict[str, object]) -> bool:
             date_taken_changed,
         )
     )
+
+
+def file_values_changed(photo: Photo, metadata: dict[str, object]) -> bool:
+    return any(
+        (
+            photo.filename != metadata["filename"],
+            photo.extension != metadata["extension"],
+            photo.size_bytes != metadata["size_bytes"],
+            normalize_datetime(photo.modified_at)
+            != normalize_datetime(metadata["modified_at"]),
+        )
+    )
+
+
+def is_missing_metadata_value(value: object) -> bool:
+    return value is None or value == ""
+
+
+def exif_backfill_values_changed(photo: Photo, metadata: dict[str, object]) -> bool:
+    return any(
+        is_missing_metadata_value(getattr(photo, key))
+        and not is_missing_metadata_value(metadata[key])
+        for key in EXIF_METADATA_KEYS
+    )
+
+
+def apply_exif_backfill_metadata(
+    photo: Photo,
+    metadata: dict[str, object],
+    *,
+    scanned_at: datetime,
+) -> None:
+    for key in EXIF_METADATA_KEYS:
+        if is_missing_metadata_value(getattr(photo, key)) and not is_missing_metadata_value(
+            metadata[key]
+        ):
+            setattr(photo, key, metadata[key])
+
+    photo.scanned_at = scanned_at
 
 
 def apply_photo_metadata(
@@ -587,6 +816,21 @@ def reset_scan_session_progress(scan_session: ScanSession) -> None:
     )
 
 
+def request_scan_cancellation(scan_id: int) -> None:
+    with CANCELLED_SCAN_IDS_LOCK:
+        CANCELLED_SCAN_IDS.add(scan_id)
+
+
+def is_scan_cancelled(scan_id: int) -> bool:
+    with CANCELLED_SCAN_IDS_LOCK:
+        return scan_id in CANCELLED_SCAN_IDS
+
+
+def clear_scan_cancellation(scan_id: int) -> None:
+    with CANCELLED_SCAN_IDS_LOCK:
+        CANCELLED_SCAN_IDS.discard(scan_id)
+
+
 def get_latest_scan_session(session, folder_path: str) -> ScanSession | None:
     return (
         session.query(ScanSession)
@@ -596,7 +840,13 @@ def get_latest_scan_session(session, folder_path: str) -> ScanSession | None:
     )
 
 
-def get_or_create_scan_session(session, *, folder_path: str, resume: bool) -> tuple[int, bool, bool]:
+def get_or_create_scan_session(
+    session,
+    *,
+    folder_path: str,
+    resume: bool,
+    force_metadata: bool,
+) -> tuple[int, bool, bool]:
     latest_session = get_latest_scan_session(session, folder_path)
     resumed = False
 
@@ -613,6 +863,7 @@ def get_or_create_scan_session(session, *, folder_path: str, resume: bool) -> tu
         scan_session.started_at = datetime.now(timezone.utc)
         scan_session.completed_at = None
         scan_session.last_error = None
+        scan_session.force_metadata = force_metadata
         reset_scan_session_progress(scan_session)
         session.commit()
         resumed = True
@@ -628,6 +879,7 @@ def get_or_create_scan_session(session, *, folder_path: str, resume: bool) -> tu
             updated_files=0,
             skipped_files=0,
             failed_files=0,
+            force_metadata=force_metadata,
             last_error=None,
         )
         session.add(scan_session)
@@ -637,7 +889,7 @@ def get_or_create_scan_session(session, *, folder_path: str, resume: bool) -> tu
     return scan_session.id, resumed, False
 
 
-def run_scan_job(scan_id: int, *, resumed: bool) -> None:
+def run_scan_job(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
     start_time = time.monotonic()
     scanned_at = datetime.now(timezone.utc)
     files_seen = 0
@@ -646,12 +898,14 @@ def run_scan_job(scan_id: int, *, resumed: bool) -> None:
     updated_files = 0
     skipped_files = 0
     failed_files = 0
+    cancelled = False
 
     with SessionLocal() as session:
         scan_session = session.get(ScanSession, scan_id)
 
         if scan_session is None:
             print(f"Scan session not found: {scan_id}", flush=True)
+            clear_scan_cancellation(scan_id)
             return
 
         folder = Path(scan_session.folder_path)
@@ -669,6 +923,10 @@ def run_scan_job(scan_id: int, *, resumed: bool) -> None:
 
         try:
             for path in folder.rglob("*"):
+                if is_scan_cancelled(scan_id):
+                    cancelled = True
+                    break
+
                 if not path.is_file():
                     continue
 
@@ -696,7 +954,7 @@ def run_scan_job(scan_id: int, *, resumed: bool) -> None:
                     continue
 
                 try:
-                    metadata = build_file_metadata(path)
+                    basic_metadata = build_basic_file_metadata(path)
                 except OSError as error:
                     print(f"Could not read file {path}: {error}", flush=True)
                     failed_files += 1
@@ -704,16 +962,41 @@ def run_scan_job(scan_id: int, *, resumed: bool) -> None:
 
                 photo = (
                     session.query(Photo)
-                    .filter(Photo.path == metadata["path"])
+                    .filter(Photo.path == basic_metadata["path"])
                     .one_or_none()
                 )
 
-                if photo is None:
-                    photo = Photo(**metadata, scanned_at=scanned_at)
-                    session.add(photo)
-                    new_files += 1
+                if photo is not None and not file_values_changed(photo, basic_metadata):
+                    if force_metadata:
+                        metadata = {
+                            **basic_metadata,
+                            **extract_exif_metadata(path),
+                        }
+
+                        if exif_backfill_values_changed(photo, metadata):
+                            apply_exif_backfill_metadata(
+                                photo,
+                                metadata,
+                                scanned_at=scanned_at,
+                            )
+                            updated_files += 1
+                        else:
+                            skipped_files += 1
+                    else:
+                        skipped_files += 1
                 else:
-                    if metadata_values_changed(photo, metadata):
+                    try:
+                        metadata = build_file_metadata(path)
+                    except OSError as error:
+                        print(f"Could not read file {path}: {error}", flush=True)
+                        failed_files += 1
+                        continue
+
+                    if photo is None:
+                        photo = Photo(**metadata, scanned_at=scanned_at)
+                        session.add(photo)
+                        new_files += 1
+                    elif metadata_values_changed(photo, metadata):
                         apply_photo_metadata(
                             photo,
                             metadata,
@@ -766,7 +1049,11 @@ def run_scan_job(scan_id: int, *, resumed: bool) -> None:
             scan_session.last_error = str(error)
             session.commit()
             print(f"Scan failed: {error}", flush=True)
+            clear_scan_cancellation(scan_id)
             return
+
+        if is_scan_cancelled(scan_id):
+            cancelled = True
 
         apply_scan_counters(
             scan_session,
@@ -777,15 +1064,16 @@ def run_scan_job(scan_id: int, *, resumed: bool) -> None:
             skipped_files=skipped_files,
             failed_files=failed_files,
         )
-        scan_session.status = "completed"
+        scan_session.status = "cancelled" if cancelled else "completed"
         scan_session.completed_at = datetime.now(timezone.utc)
         scan_session.last_error = None
         session.commit()
         session.refresh(scan_session)
 
+    clear_scan_cancellation(scan_id)
     elapsed_time = time.monotonic() - start_time
     print_scan_counters(
-        "Scan complete",
+        "Scan cancelled" if cancelled else "Scan complete",
         files_seen=files_seen,
         image_files_matched=image_files_matched,
         new_files=new_files,
@@ -799,10 +1087,14 @@ def run_scan_job(scan_id: int, *, resumed: bool) -> None:
     )
 
 
-def start_scan_thread(scan_id: int, *, resumed: bool) -> None:
+def start_scan_thread(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
     thread = Thread(
         target=run_scan_job,
-        kwargs={"scan_id": scan_id, "resumed": resumed},
+        kwargs={
+            "scan_id": scan_id,
+            "resumed": resumed,
+            "force_metadata": force_metadata,
+        },
         daemon=True,
     )
     thread.start()
@@ -812,6 +1104,7 @@ def start_scan_thread(scan_id: int, *, resumed: bool) -> None:
 def scan_folder(
     folder_path: str,
     resume: bool = False,
+    force_metadata: bool = False,
 ) -> dict[str, object]:
     folder = Path(folder_path).expanduser()
 
@@ -826,6 +1119,7 @@ def scan_folder(
             session,
             folder_path=str(folder),
             resume=resume,
+            force_metadata=force_metadata,
         )
 
     if already_running:
@@ -834,6 +1128,8 @@ def scan_folder(
                 "scan_id": scan_id,
                 "status": "running",
                 "folder_path": str(folder),
+                "force_metadata": force_metadata,
+                "exiftool_available": is_exiftool_available(),
                 "message": "A scan is already running for this folder.",
             }
 
@@ -842,13 +1138,34 @@ def scan_folder(
             detail="A scan is already running for this folder.",
         )
 
-    start_scan_thread(scan_id, resumed=resumed)
+    start_scan_thread(scan_id, resumed=resumed, force_metadata=force_metadata)
 
     return {
         "scan_id": scan_id,
         "status": "running",
         "folder_path": str(folder),
+        "force_metadata": force_metadata,
+        "exiftool_available": is_exiftool_available(),
     }
+
+
+@app.post("/scan-sessions/{scan_id}/cancel")
+def cancel_scan_session(scan_id: int) -> dict[str, object]:
+    with SessionLocal() as session:
+        scan_session = session.get(ScanSession, scan_id)
+
+        if scan_session is None:
+            raise HTTPException(status_code=404, detail="Scan session not found")
+
+        if scan_session.status == "running":
+            request_scan_cancellation(scan_id)
+            response = format_scan_status(scan_session)
+            response["message"] = "Scan cancellation requested."
+            return response
+
+        response = format_scan_status(scan_session)
+        response["message"] = "Scan is not running."
+        return response
 
 
 @app.get("/scan-sessions")

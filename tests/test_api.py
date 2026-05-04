@@ -4,6 +4,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
 
 test_db_dir = tempfile.TemporaryDirectory()
 test_db_path = Path(test_db_dir.name) / "image_insight_test.db"
@@ -21,7 +22,7 @@ client = TestClient(app)
 atexit.register(engine.dispose)
 
 
-TERMINAL_SCAN_STATUSES = {"completed", "failed", "interrupted"}
+TERMINAL_SCAN_STATUSES = {"completed", "failed", "interrupted", "cancelled"}
 
 
 class FakeExifImage:
@@ -61,6 +62,20 @@ def test_health_returns_ok() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_system_info_returns_runtime_visibility(monkeypatch) -> None:
+    monkeypatch.setattr(main_module.shutil, "which", lambda name: "exiftool")
+
+    response = client.get("/system-info")
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["app_version"] == "0.8.0"
+    assert data["database_path"].endswith("image_insight_test.db")
+    assert isinstance(data["photo_count"], int)
+    assert isinstance(data["scan_session_count"], int)
+    assert data["exiftool_available"] is True
 
 
 def test_stats_returns_valid_json_structure() -> None:
@@ -207,6 +222,9 @@ def test_scan_sessions_history_response_and_limit_behavior(tmp_path: Path) -> No
         "skipped_files",
         "failed_files",
         "elapsed_seconds",
+        "scan_speed_files_per_second",
+        "force_metadata",
+        "exiftool_available",
         "last_error",
     } == set(first_scan)
     assert first_scan["elapsed_seconds"] >= 0
@@ -241,6 +259,143 @@ def test_scan_folder_counts_changed_files_as_updated(tmp_path: Path) -> None:
     assert second_data["new_files"] == 0
     assert second_data["updated_files"] == 1
     assert second_data["skipped_files"] == 0
+
+
+def test_scan_folder_force_metadata_backfills_null_exif_fields(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    image_file = tmp_path / "metadata-backfill.jpg"
+    image_file.write_text("image bytes")
+    extract_calls = 0
+
+    def fake_extract_exif_metadata(path: Path) -> dict[str, object]:
+        nonlocal extract_calls
+        extract_calls += 1
+
+        if extract_calls == 1:
+            return main_module.EMPTY_EXIF_METADATA.copy()
+
+        if extract_calls == 2:
+            return {
+                **main_module.EMPTY_EXIF_METADATA,
+                "lens_model": "XF35mmF1.4 R",
+                "focal_length": 35.0,
+            }
+
+        return {
+            **main_module.EMPTY_EXIF_METADATA,
+            "lens_model": "Different Lens",
+            "focal_length": 50.0,
+        }
+
+    monkeypatch.setattr(
+        main_module,
+        "extract_exif_metadata",
+        fake_extract_exif_metadata,
+    )
+
+    first_response = client.post("/scan-folder", params={"folder_path": str(tmp_path)})
+    first_data = wait_for_scan(first_response.json()["scan_id"])
+
+    assert first_response.status_code == 200
+    assert first_data["new_files"] == 1
+    assert first_data["updated_files"] == 0
+    assert extract_calls == 1
+
+    second_response = client.post("/scan-folder", params={"folder_path": str(tmp_path)})
+    second_data = wait_for_scan(second_response.json()["scan_id"])
+
+    assert second_response.status_code == 200
+    assert second_data["new_files"] == 0
+    assert second_data["updated_files"] == 0
+    assert second_data["skipped_files"] == 1
+    assert extract_calls == 1
+
+    with SessionLocal() as session:
+        photo = session.query(Photo).filter(Photo.path == str(image_file)).one()
+        assert photo.lens_model is None
+        assert photo.focal_length is None
+
+    force_response = client.post(
+        "/scan-folder",
+        params={"folder_path": str(tmp_path), "force_metadata": True},
+    )
+    force_data = wait_for_scan(force_response.json()["scan_id"])
+
+    assert force_response.status_code == 200
+    assert force_data["new_files"] == 0
+    assert force_data["updated_files"] == 1
+    assert force_data["skipped_files"] == 0
+    assert extract_calls == 2
+
+    with SessionLocal() as session:
+        photo = session.query(Photo).filter(Photo.path == str(image_file)).one()
+        assert photo.lens_model == "XF35mmF1.4 R"
+        assert photo.focal_length == 35.0
+
+    second_force_response = client.post(
+        "/scan-folder",
+        params={"folder_path": str(tmp_path), "force_metadata": True},
+    )
+    second_force_data = wait_for_scan(second_force_response.json()["scan_id"])
+
+    assert second_force_response.status_code == 200
+    assert second_force_data["updated_files"] == 0
+    assert second_force_data["skipped_files"] == 1
+    assert extract_calls == 3
+
+    with SessionLocal() as session:
+        photo = session.query(Photo).filter(Photo.path == str(image_file)).one()
+        assert photo.lens_model == "XF35mmF1.4 R"
+        assert photo.focal_length == 35.0
+
+
+def test_running_scan_can_be_cancelled(tmp_path: Path, monkeypatch) -> None:
+    image_files = [tmp_path / f"photo-{index}.jpg" for index in range(5)]
+
+    for image_file in image_files:
+        image_file.write_text("image bytes")
+
+    original_build_file_metadata = main_module.build_file_metadata
+    metadata_started = Event()
+
+    def slow_build_file_metadata(path: Path) -> dict[str, object]:
+        metadata_started.set()
+        time.sleep(0.15)
+        return original_build_file_metadata(path)
+
+    monkeypatch.setattr(
+        main_module,
+        "build_file_metadata",
+        slow_build_file_metadata,
+    )
+
+    start_response = client.post("/scan-folder", params={"folder_path": str(tmp_path)})
+    scan_id = start_response.json()["scan_id"]
+
+    assert start_response.status_code == 200
+    assert metadata_started.wait(timeout=2)
+
+    cancel_response = client.post(f"/scan-sessions/{scan_id}/cancel")
+    cancel_data = cancel_response.json()
+
+    assert cancel_response.status_code == 200
+    assert cancel_data["scan_id"] == scan_id
+    assert cancel_data["message"] == "Scan cancellation requested."
+
+    cancelled_status = wait_for_scan(scan_id, expected_status="cancelled")
+
+    assert cancelled_status["status"] == "cancelled"
+    assert cancelled_status["image_files_matched"] < len(image_files)
+    assert cancelled_status["last_error"] is None
+
+    session_detail_response = client.get(f"/scan-sessions/{scan_id}")
+    session_detail = session_detail_response.json()
+
+    assert session_detail_response.status_code == 200
+    assert session_detail["status"] == "cancelled"
+    assert session_detail["completed_at"] is not None
 
 
 def test_scan_folder_extracts_exif_and_stats(tmp_path: Path) -> None:
@@ -278,7 +433,7 @@ def test_scan_folder_extracts_exif_and_stats(tmp_path: Path) -> None:
     assert photo["focal_length"] == 50.0
     assert photo["iso"] == 400
     assert photo["aperture"] == 1.8
-    assert photo["shutter_speed"] == "1/100s"
+    assert photo["shutter_speed"] == "1/125s"
     assert photo["date_taken"].startswith("2024-07-14T09:30:00")
 
     stats_response = client.get("/stats")
@@ -326,6 +481,111 @@ def test_extract_exif_metadata_uses_lens_fallbacks_and_tuple_focal_length(
     assert metadata["lens_model"] == "Nikkor 24-70mm f/2.8-4"
     assert metadata["focal_length"] == 52.5
     assert metadata["date_taken"].isoformat().startswith("2024-08-20T14:15:00")
+
+
+def test_extract_exif_metadata_uses_exiftool_when_available(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    image_file = tmp_path / "raw-photo.dng"
+    exiftool_output = (
+        '[{"Make":"Fujifilm","Model":"X-T5","LensModel":"XF35mmF1.4 R",'
+        '"FocalLength":"35 mm","ISO":800,"FNumber":1.4,'
+        '"ExposureTime":"1/250","DateTimeOriginal":"2024:09:01 10:11:12"}]'
+    )
+
+    monkeypatch.setattr(main_module.shutil, "which", lambda name: "exiftool")
+    monkeypatch.setattr(
+        main_module.subprocess,
+        "run",
+        lambda *args, **kwargs: main_module.subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=exiftool_output,
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "extract_pillow_exif_metadata",
+        lambda path: main_module.EMPTY_EXIF_METADATA.copy(),
+    )
+
+    metadata = main_module.extract_exif_metadata(image_file)
+
+    assert metadata["camera_make"] == "Fujifilm"
+    assert metadata["camera_model"] == "X-T5"
+    assert metadata["lens_model"] == "XF35mmF1.4 R"
+    assert metadata["focal_length"] == 35
+    assert metadata["iso"] == 800
+    assert metadata["aperture"] == 1.4
+    assert metadata["shutter_speed"] == "1/250s"
+    assert metadata["date_taken"].isoformat().startswith("2024-09-01T10:11:12")
+
+
+def test_extract_exif_metadata_merges_exiftool_with_pillow_fallback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    image_file = tmp_path / "partial-exif.jpg"
+    exiftool_output = (
+        '[{"Make":"Sony","Model":"ILCE-7M4","LensMake":"Sony",'
+        '"LensSpecification":[24,70,2.8,2.8]}]'
+    )
+    pillow_metadata = {
+        **main_module.EMPTY_EXIF_METADATA,
+        "focal_length": 50.0,
+        "iso": 400,
+    }
+
+    monkeypatch.setattr(main_module.shutil, "which", lambda name: "exiftool")
+    monkeypatch.setattr(
+        main_module.subprocess,
+        "run",
+        lambda *args, **kwargs: main_module.subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=exiftool_output,
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "extract_pillow_exif_metadata",
+        lambda path: pillow_metadata,
+    )
+
+    metadata = main_module.extract_exif_metadata(image_file)
+
+    assert metadata["camera_make"] == "Sony"
+    assert metadata["camera_model"] == "ILCE-7M4"
+    assert metadata["lens_model"] == "Sony 24-70mm f/2.8"
+    assert metadata["focal_length"] == 50.0
+    assert metadata["iso"] == 400
+
+
+def test_extract_exif_metadata_falls_back_when_exiftool_unavailable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    image_file = tmp_path / "no-exiftool.jpg"
+    pillow_metadata = {
+        **main_module.EMPTY_EXIF_METADATA,
+        "camera_model": "EOS R6",
+        "focal_length": 85.0,
+    }
+
+    monkeypatch.setattr(main_module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        main_module,
+        "extract_pillow_exif_metadata",
+        lambda path: pillow_metadata,
+    )
+
+    metadata = main_module.extract_exif_metadata(image_file)
+
+    assert metadata["camera_model"] == "EOS R6"
+    assert metadata["focal_length"] == 85.0
 
 
 def test_parse_focal_length_handles_common_exif_value_shapes() -> None:

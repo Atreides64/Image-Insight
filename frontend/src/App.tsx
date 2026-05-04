@@ -82,10 +82,20 @@ type DashboardPreferences = {
   showFileTypeTable: boolean;
 };
 
+type SystemInfo = {
+  app_version: string;
+  database_path: string;
+  photo_count: number;
+  scan_session_count: number;
+  exiftool_available: boolean;
+};
+
 type ScanStartResult = {
   scan_id: number;
   status: string;
   folder_path: string;
+  force_metadata: boolean;
+  exiftool_available: boolean;
   message?: string;
 };
 
@@ -102,6 +112,9 @@ type ScanSession = {
   skipped_files: number;
   failed_files: number;
   elapsed_seconds: number;
+  scan_speed_files_per_second: number;
+  force_metadata: boolean;
+  exiftool_available: boolean;
   last_error: string | null;
 };
 
@@ -116,12 +129,15 @@ type ScanStatus = {
   skipped_files: number;
   failed_files: number;
   elapsed_seconds: number;
+  scan_speed_files_per_second: number;
+  force_metadata: boolean;
+  exiftool_available: boolean;
   last_error: string | null;
 };
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
-const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted"];
+const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted", "cancelled"];
 const PHOTO_SEARCH_LIMIT = 25;
 const DASHBOARD_PREFERENCES_STORAGE_KEY = "image-insight-dashboard-preferences";
 const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
@@ -303,6 +319,8 @@ function formatScanStatus(status: string): string {
       return "Failed";
     case "interrupted":
       return "Interrupted";
+    case "cancelled":
+      return "Cancelled";
     case "running":
       return "Running";
     default:
@@ -310,13 +328,25 @@ function formatScanStatus(status: string): string {
   }
 }
 
+function formatScanSpeed(value: number | null | undefined): string {
+  if (!value || value <= 0) {
+    return "0 files/sec";
+  }
+
+  return `${value.toLocaleString(undefined, {
+    maximumFractionDigits: 1,
+  })} files/sec`;
+}
+
 function App() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboardPreferences, setDashboardPreferences] =
     useState<DashboardPreferences>(loadDashboardPreferences);
   const [folderPath, setFolderPath] = useState("");
+  const [refreshMetadata, setRefreshMetadata] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -352,6 +382,20 @@ function App() {
       );
     } finally {
       setIsLoading(false);
+    }
+  }, []);
+
+  const loadSystemInfo = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/system-info`);
+
+      if (!response.ok) {
+        throw new Error(`System info request failed with ${response.status}`);
+      }
+
+      setSystemInfo((await response.json()) as SystemInfo);
+    } catch {
+      setSystemInfo(null);
     }
   }, []);
 
@@ -442,8 +486,9 @@ function App() {
 
   useEffect(() => {
     loadStats();
+    void loadSystemInfo();
     void loadScanHistory();
-  }, [loadScanHistory, loadStats]);
+  }, [loadScanHistory, loadStats, loadSystemInfo]);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -484,6 +529,7 @@ function App() {
           setActiveScanId(null);
           await loadLatestScanSession(status.folder_path);
           await loadScanHistory();
+          await loadSystemInfo();
 
           if (status.status === "completed") {
             const failedFilesMessage =
@@ -495,6 +541,10 @@ function App() {
               `Scan complete for ${status.folder_path}. ${status.image_files_matched.toLocaleString()} image files matched, ${status.new_files.toLocaleString()} new, ${status.updated_files.toLocaleString()} updated, ${status.skipped_files.toLocaleString()} skipped in ${status.elapsed_seconds.toFixed(2)}s.${failedFilesMessage}`,
             );
             await loadStats();
+          } else if (status.status === "cancelled") {
+            setScanMessage(
+              `Scan cancelled for ${status.folder_path}. ${status.image_files_matched.toLocaleString()} image files matched before it stopped.`,
+            );
           } else {
             setScanError(
               status.last_error
@@ -521,7 +571,13 @@ function App() {
       isCancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [activeScanId, loadLatestScanSession, loadScanHistory, loadStats]);
+  }, [
+    activeScanId,
+    loadLatestScanSession,
+    loadScanHistory,
+    loadStats,
+    loadSystemInfo,
+  ]);
 
   async function runScan({
     resume,
@@ -544,7 +600,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/scan-folder?folder_path=${encodeURIComponent(trimmedPath)}&resume=${resume}`,
+        `${API_BASE_URL}/scan-folder?folder_path=${encodeURIComponent(trimmedPath)}&resume=${resume}&force_metadata=${refreshMetadata}`,
         { method: "POST" },
       );
 
@@ -568,11 +624,14 @@ function App() {
       setScanMessage(
         resume
           ? `Resume started for ${result.folder_path}.`
+          : refreshMetadata
+            ? `Metadata refresh started for ${result.folder_path}.`
           : `Scan started for ${result.folder_path}.`,
       );
       setFolderPath(result.folder_path);
       await loadLatestScanSession(trimmedPath);
       await loadScanHistory();
+      await loadSystemInfo();
     } catch (caughtError) {
       await loadLatestScanSession(trimmedPath);
       await loadScanHistory();
@@ -581,6 +640,32 @@ function App() {
         caughtError instanceof Error
           ? `Could not start scan. ${caughtError.message}`
           : "Could not start scan. You can review the last scan status and resume it when ready.",
+      );
+    }
+  }
+
+  async function cancelActiveScan() {
+    if (activeScanId === null) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/scan-sessions/${activeScanId}/cancel`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Cancel request failed with ${response.status}`);
+      }
+
+      setScanMessage("Cancelling scan...");
+      setScanError(null);
+    } catch (caughtError) {
+      setScanError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to cancel scan.",
       );
     }
   }
@@ -691,6 +776,33 @@ function App() {
           <strong>Could not load stats.</strong>
           <span>{error}</span>
         </div>
+      )}
+
+      {systemInfo && (
+        <section className="system-info-panel" aria-labelledby="system-info-heading">
+          <div className="section-heading">
+            <h2 id="system-info-heading">System Info</h2>
+            <span>v{systemInfo.app_version}</span>
+          </div>
+          <dl className="system-info-grid">
+            <div>
+              <dt>Database</dt>
+              <dd>{systemInfo.database_path}</dd>
+            </div>
+            <div>
+              <dt>Photos</dt>
+              <dd>{systemInfo.photo_count.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Scan sessions</dt>
+              <dd>{systemInfo.scan_session_count.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>ExifTool</dt>
+              <dd>{systemInfo.exiftool_available ? "Detected" : "Not detected"}</dd>
+            </div>
+          </dl>
+        </section>
       )}
 
       <section className="customize-section" aria-labelledby="customize-heading">
@@ -861,6 +973,15 @@ function App() {
               {isScanning ? "Scanning..." : "Scan"}
             </button>
           </div>
+          <label className="scan-option">
+            <input
+              type="checkbox"
+              checked={refreshMetadata}
+              onChange={(event) => setRefreshMetadata(event.target.checked)}
+              disabled={isScanning}
+            />
+            Refresh metadata
+          </label>
         </form>
 
         {lastScanSession && (
@@ -878,11 +999,23 @@ function App() {
               {lastScanSession.new_files.toLocaleString()}, updated:{" "}
               {lastScanSession.updated_files.toLocaleString()}, skipped:{" "}
               {lastScanSession.skipped_files.toLocaleString()}, failed:{" "}
-              {lastScanSession.failed_files.toLocaleString()}.
+              {lastScanSession.failed_files.toLocaleString()}, speed:{" "}
+              {formatScanSpeed(lastScanSession.scan_speed_files_per_second)}.
             </p>
+            {(lastScanSession.force_metadata ||
+              lastScanSession.exiftool_available) && (
+              <p className="scan-history-note">
+                {lastScanSession.exiftool_available
+                  ? "ExifTool enabled."
+                  : "ExifTool not detected."}{" "}
+                {lastScanSession.force_metadata
+                  ? "Metadata backfill was enabled."
+                  : ""}
+              </p>
+            )}
             {lastScanSession.last_error && (
               <p className="scan-history-note">
-                Last note: {lastScanSession.last_error}
+                Last error: {lastScanSession.last_error}
               </p>
             )}
             {canResumeLastScan && (
@@ -904,6 +1037,23 @@ function App() {
             <span>
               Scanning folder in the background... dashboard updates every few seconds.
             </span>
+            <span className="scan-progress-detail">
+              {(activeScanStatus?.exiftool_available ??
+                systemInfo?.exiftool_available)
+                ? "ExifTool enabled"
+                : "ExifTool not detected"}
+            </span>
+            {(activeScanStatus?.force_metadata ?? refreshMetadata) && (
+              <span className="scan-progress-detail">Metadata backfill enabled</span>
+            )}
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void cancelActiveScan()}
+              disabled={activeScanId === null}
+            >
+              Cancel Scan
+            </button>
           </div>
         )}
 
@@ -933,7 +1083,17 @@ function App() {
               <span>Failed</span>
               <strong>{activeScanStatus.failed_files.toLocaleString()}</strong>
             </div>
+            <div>
+              <span>Speed</span>
+              <strong>
+                {formatScanSpeed(activeScanStatus.scan_speed_files_per_second)}
+              </strong>
+            </div>
           </div>
+        )}
+
+        {activeScanStatus?.last_error && (
+          <p className="scan-feedback failure">{activeScanStatus.last_error}</p>
         )}
 
         {scanMessage && <p className="scan-feedback success">{scanMessage}</p>}
