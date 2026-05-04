@@ -9,6 +9,7 @@ Image Insight has a FastAPI backend with `/health`, `/system-info`, `POST /scan-
 - Modified `app/main.py` and `app/models.py` to add v0.8.0 system visibility, scan speed, ExifTool availability, and persisted scan `force_metadata` flag.
 - Modified `frontend/src/App.tsx` and `frontend/src/styles.css` to add a System Info panel, Refresh metadata checkbox, ExifTool/backfill scan indicators, scan speed, active scan errors, and active scan cancellation button.
 - Modified `tests/test_api.py` to cover system info, forced backfill of previously null lens/focal-length metadata, cancellation of a running scan, and expanded scan session fields.
+- Modified `AGENTS.md` to fix stale scan-status wording, the `photo_timeline` endpoint reference, and pytest capitalization.
 - Modified `README.md`, `AGENTS.md`, and `docs/progress.md`.
 
 # Decisions Made
@@ -116,3 +117,4 @@ Open:
 - 2026-05-04: Added forced metadata backfill scans with `force_metadata=true`, a frontend Refresh metadata checkbox, and regression coverage for filling previously null lens/focal-length fields.
 - 2026-05-04: Added v0.7.2 scan cancellation with an in-memory cancel request endpoint, persisted `cancelled` terminal status, dashboard Cancel Scan action, and regression coverage.
 - 2026-05-04: Added v0.8.0 polish with `/system-info`, dashboard System Info, scan speed, ExifTool/backfill indicators, active scan error visibility, and persisted scan `force_metadata` flag.
+- 2026-05-04: Corrected `AGENTS.md` wording for `/scan-status`, `/stats.photo_timeline`, and pytest.
