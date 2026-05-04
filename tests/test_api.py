@@ -24,6 +24,20 @@ atexit.register(engine.dispose)
 TERMINAL_SCAN_STATUSES = {"completed", "failed", "interrupted"}
 
 
+class FakeExifImage:
+    def __init__(self, exif_data: dict[int, object]) -> None:
+        self.exif_data = exif_data
+
+    def __enter__(self) -> "FakeExifImage":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def getexif(self) -> dict[int, object]:
+        return self.exif_data
+
+
 def wait_for_scan(scan_id: int, *, expected_status: str = "completed") -> dict[str, object]:
     deadline = time.monotonic() + 5
     last_status: dict[str, object] | None = None
@@ -283,6 +297,44 @@ def test_scan_folder_extracts_exif_and_stats(tmp_path: Path) -> None:
         "top_lens": "RF50mm F1.8 STM",
     } in stats_data["photo_timeline"]
     assert stats_data["busiest_date"] == {"label": "2024-07-14", "count": 1}
+
+
+def test_extract_exif_metadata_uses_lens_fallbacks_and_tuple_focal_length(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    image_file = tmp_path / "mock-exif.jpg"
+    exif_data = {
+        271: "Nikon",
+        272: "Z 8",
+        37386: (105, 2),
+        42036: "0",
+        42035: "Nikkor",
+        42034: (24, 70, (28, 10), 4),
+        36867: "2024:08:20 14:15:00",
+    }
+
+    monkeypatch.setattr(
+        main_module.Image,
+        "open",
+        lambda path: FakeExifImage(exif_data),
+    )
+
+    metadata = main_module.extract_exif_metadata(image_file)
+
+    assert metadata["camera_model"] == "Z 8"
+    assert metadata["lens_model"] == "Nikkor 24-70mm f/2.8-4"
+    assert metadata["focal_length"] == 52.5
+    assert metadata["date_taken"].isoformat().startswith("2024-08-20T14:15:00")
+
+
+def test_parse_focal_length_handles_common_exif_value_shapes() -> None:
+    assert main_module.parse_focal_length(50) == 50
+    assert main_module.parse_focal_length(35.5) == 35.5
+    assert main_module.parse_focal_length((85, 2)) == 42.5
+    assert main_module.parse_focal_length("50/1") == 50
+    assert main_module.parse_focal_length("35 mm") == 35
+    assert main_module.parse_focal_length("0") is None
 
 
 def test_search_photos_filters_metadata(tmp_path: Path) -> None:

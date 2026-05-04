@@ -2,6 +2,7 @@ import time
 from collections import Counter
 from datetime import datetime, time as datetime_time, timezone
 from pathlib import Path
+import re
 from threading import Thread
 
 from fastapi import FastAPI, HTTPException
@@ -82,16 +83,155 @@ def clean_exif_text(value: object) -> str | None:
         return None
 
     cleaned = str(value).strip().strip("\x00")
-    return cleaned or None
+    if cleaned in {"", "0"}:
+        return None
+
+    return cleaned
 
 
-def rational_to_float(value: object) -> float | None:
+def parse_rational_number(value: object) -> float | None:
+    if value is None:
+        return None
+
+    if isinstance(value, tuple):
+        if len(value) == 2:
+            numerator = parse_rational_number(value[0])
+            denominator = parse_rational_number(value[1])
+            if numerator is None or denominator in (None, 0):
+                return None
+            return numerator / denominator
+
+        if len(value) == 1:
+            return parse_rational_number(value[0])
+
+        return None
+
+    if isinstance(value, str):
+        cleaned_value = value.strip().strip("\x00")
+        if not cleaned_value or cleaned_value == "0":
+            return None
+
+        if "/" in cleaned_value:
+            numerator, denominator = cleaned_value.split("/", maxsplit=1)
+            parsed_numerator = parse_rational_number(numerator)
+            parsed_denominator = parse_rational_number(denominator)
+            if parsed_numerator is None or parsed_denominator in (None, 0):
+                return None
+            return parsed_numerator / parsed_denominator
+
+        number_matches = re.findall(r"-?\d+(?:\.\d+)?", cleaned_value)
+        if not number_matches:
+            return None
+
+        if "," in cleaned_value and len(number_matches) >= 2:
+            denominator = float(number_matches[1])
+            if denominator == 0:
+                return None
+            return float(number_matches[0]) / denominator
+
+        return float(number_matches[0])
+
     try:
-        number = float(value)
+        return float(value)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
 
+
+def rational_to_float(value: object) -> float | None:
+    number = parse_rational_number(value)
+
+    if number is None:
+        return None
+
     return round(number, 2)
+
+
+def parse_focal_length(value: object) -> float | None:
+    focal_length = rational_to_float(value)
+
+    if focal_length is None or focal_length <= 0:
+        return None
+
+    return focal_length
+
+
+def format_lens_spec_part(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def lens_specification_text(value: object) -> str | None:
+    if not isinstance(value, tuple) or len(value) < 2:
+        return None
+
+    min_focal = parse_focal_length(value[0])
+    max_focal = parse_focal_length(value[1])
+    min_aperture = rational_to_float(value[2]) if len(value) > 2 else None
+    max_aperture = rational_to_float(value[3]) if len(value) > 3 else None
+
+    if min_focal is None and max_focal is None:
+        return None
+
+    focal_values = [focal for focal in (min_focal, max_focal) if focal is not None]
+    if len(focal_values) == 2 and focal_values[0] != focal_values[1]:
+        focal_text = (
+            f"{format_lens_spec_part(focal_values[0])}-"
+            f"{format_lens_spec_part(focal_values[1])}mm"
+        )
+    else:
+        focal_text = f"{format_lens_spec_part(focal_values[0])}mm"
+
+    aperture_values = [
+        aperture
+        for aperture in (min_aperture, max_aperture)
+        if aperture is not None and aperture > 0
+    ]
+    if not aperture_values:
+        return focal_text
+
+    if len(aperture_values) == 2 and aperture_values[0] != aperture_values[1]:
+        aperture_text = (
+            f"f/{format_lens_spec_part(aperture_values[0])}-"
+            f"{format_lens_spec_part(aperture_values[1])}"
+        )
+    else:
+        aperture_text = f"f/{format_lens_spec_part(aperture_values[0])}"
+
+    return f"{focal_text} {aperture_text}"
+
+
+def parse_lens_model(exif) -> str | None:
+    lens_model = clean_exif_text(exif_value(exif, "LensModel"))
+    if lens_model:
+        return lens_model
+
+    lens_make = clean_exif_text(exif_value(exif, "LensMake"))
+    lens_specification = lens_specification_text(exif_value(exif, "LensSpecification"))
+
+    if lens_make and lens_specification:
+        return f"{lens_make} {lens_specification}"
+
+    return lens_specification or lens_make
+
+
+def log_unavailable_lens_metadata(
+    path: Path,
+    exif,
+    *,
+    lens_model: str | None,
+    focal_length: float | None,
+) -> None:
+    lens_raw_values = [
+        exif_value(exif, "LensModel"),
+        exif_value(exif, "LensMake"),
+        exif_value(exif, "LensSpecification"),
+    ]
+    focal_raw_value = exif_value(exif, "FocalLength")
+
+    if lens_model is None and any(clean_exif_text(value) for value in lens_raw_values):
+        print(f"EXIF lens model unavailable for {path}", flush=True)
+
+    if focal_length is None and focal_raw_value is not None:
+        print(f"EXIF focal length unavailable for {path}", flush=True)
 
 
 def format_shutter_speed(value: object) -> str | None:
@@ -191,11 +331,20 @@ def extract_exif_metadata(path: Path) -> dict[str, object]:
     except (TypeError, ValueError):
         iso_value = None
 
+    lens_model = parse_lens_model(exif)
+    focal_length = parse_focal_length(exif_value(exif, "FocalLength"))
+    log_unavailable_lens_metadata(
+        path,
+        exif,
+        lens_model=lens_model,
+        focal_length=focal_length,
+    )
+
     return {
         "camera_make": clean_exif_text(exif_value(exif, "Make")),
         "camera_model": clean_exif_text(exif_value(exif, "Model")),
-        "lens_model": clean_exif_text(exif_value(exif, "LensModel")),
-        "focal_length": rational_to_float(exif_value(exif, "FocalLength")),
+        "lens_model": lens_model,
+        "focal_length": focal_length,
         "iso": iso_value,
         "aperture": rational_to_float(exif_value(exif, "FNumber")),
         "shutter_speed": format_shutter_speed(exif_value(exif, "ExposureTime")),
