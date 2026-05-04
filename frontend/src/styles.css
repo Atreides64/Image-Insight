@@ -330,6 +330,28 @@ h2 {
   cursor: not-allowed;
 }
 
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.small-action-button {
+  border: 1px solid #314055;
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: #edf5ff;
+  background: #151e2b;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.small-action-button:disabled {
+  color: #7f8da1;
+  cursor: not-allowed;
+}
+
 .spinner {
   width: 18px;
   height: 18px;
