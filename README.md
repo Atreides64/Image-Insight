@@ -17,6 +17,16 @@ A local-first media metadata analytics platform for analyzing and organizing exi
 - React + TypeScript
 - Recharts
 
+## Quick Start
+
+1. Start the FastAPI backend.
+2. Start the Vite dashboard.
+3. Scan a local photo folder from the dashboard.
+4. Watch scan progress, then use stats, charts, history, and metadata search.
+
+The dashboard expects the backend at `http://127.0.0.1:8000` unless
+`VITE_API_BASE_URL` is set.
+
 ## Backend Setup
 
 Create and activate a Python virtual environment:
@@ -225,11 +235,22 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 The dashboard includes a local "Customize Dashboard" panel. Users can toggle
-individual cards, charts, search/history sections, and the file type table, and
-those preferences are saved in browser `localStorage` on that device.
+individual cards, charts, search/history sections, the file type table, and a
+compact dashboard mode, and those preferences are saved in browser
+`localStorage` on that device. Scan History is collapsed by default to keep the
+main monitoring view dense, with an inline expand/collapse control when recent
+scan details are needed.
+
+The dashboard also includes a System Info panel, clearer empty states before
+data exists, scan-state messages for running/completed/failed/cancelled/
+interrupted scans, and copy actions for the database path and search result
+file paths.
 
 ## Status
 
-v0.7.0 tightens the dashboard layout, adds per-card and per-section
-customization, and adds a richer photo timeline insight chart. Duplicates, maps,
-open-in-folder, previews, and external job services remain future work.
+v0.9.0 focuses on stability and UX polish on top of the v0.8 scan,
+ExifTool, metadata backfill, cancellation, and system-info work. It keeps the
+dashboard compact and readable without changing backend scan behavior.
+Duplicates, maps, open-in-folder, previews, scan groups, archive scanning,
+desktop packaging, cloud integrations, and external job services remain future
+work.

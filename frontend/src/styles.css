@@ -34,6 +34,10 @@ select {
   padding: 40px 0;
 }
 
+.app-shell.compact-mode {
+  padding: 28px 0;
+}
+
 .page-header {
   display: flex;
   align-items: flex-start;
@@ -153,6 +157,29 @@ h2 {
   accent-color: #6fd3b8;
 }
 
+.section-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.compact-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #d5dfed;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.compact-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: #6fd3b8;
+}
+
 .scan-section {
   border-radius: 8px;
   margin-bottom: 18px;
@@ -194,10 +221,19 @@ h2 {
 }
 
 .system-info-grid dd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   margin: 0;
   overflow-wrap: anywhere;
   color: #edf5ff;
   font-weight: 700;
+}
+
+.system-info-grid dd span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .scan-heading {
@@ -307,6 +343,24 @@ h2 {
   gap: 16px;
   padding: 14px 22px;
   color: #a7b3c6;
+}
+
+.collapsed-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 22px;
+  color: #a7b3c6;
+  background: #101823;
+}
+
+.collapsed-summary strong {
+  color: #edf5ff;
+}
+
+.collapsed-summary span {
+  overflow-wrap: anywhere;
 }
 
 .search-results-summary strong {
@@ -459,6 +513,17 @@ h2 {
   cursor: not-allowed;
 }
 
+.inline-action-button {
+  border: 1px solid #314055;
+  border-radius: 8px;
+  padding: 5px 8px;
+  color: #edf5ff;
+  background: #151e2b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .spinner {
   width: 18px;
   height: 18px;
@@ -597,6 +662,198 @@ td {
 
 td:first-child {
   font-weight: 700;
+}
+
+.compact-mode .page-header {
+  margin-bottom: 18px;
+}
+
+.compact-mode .status-pill {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+}
+
+.compact-mode .state-message,
+.compact-mode .error-panel {
+  padding: 12px 14px;
+}
+
+.compact-mode .system-info-panel,
+.compact-mode .customize-section,
+.compact-mode .scan-section,
+.compact-mode .search-section {
+  margin-bottom: 12px;
+}
+
+.compact-mode .system-info-grid {
+  grid-template-columns: minmax(260px, 2.2fr) repeat(3, minmax(100px, 1fr));
+  gap: 8px;
+  padding: 10px 16px 12px;
+}
+
+.compact-mode .system-info-grid dt {
+  margin-bottom: 4px;
+  font-size: 0.72rem;
+}
+
+.compact-mode .system-info-grid dd {
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.compact-mode .section-heading {
+  padding: 12px 16px;
+}
+
+.compact-mode .section-heading span {
+  font-size: 0.84rem;
+}
+
+.compact-mode .customize-grid {
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.compact-mode .customize-group {
+  gap: 8px;
+}
+
+.compact-mode .customize-controls {
+  gap: 6px;
+}
+
+.compact-mode .customize-controls label {
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.compact-mode .scan-form,
+.compact-mode .search-form {
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.compact-mode .scan-controls input,
+.compact-mode .search-form input,
+.compact-mode .scan-controls button,
+.compact-mode .search-form button {
+  padding: 9px 11px;
+}
+
+.compact-mode .search-results-summary {
+  padding: 10px 16px;
+}
+
+.compact-mode .scan-feedback {
+  margin: 0 16px 14px;
+  padding: 9px 11px;
+}
+
+.compact-mode .scan-progress {
+  gap: 8px;
+  margin: 0 16px 14px;
+  padding: 9px 11px;
+}
+
+.compact-mode .scan-progress-detail,
+.compact-mode .scan-status {
+  padding: 4px 8px;
+  font-size: 0.78rem;
+}
+
+.compact-mode .scan-live-panel {
+  gap: 8px;
+  margin: 0 16px 14px;
+}
+
+.compact-mode .scan-live-panel div {
+  min-height: 58px;
+  padding: 9px;
+}
+
+.compact-mode .scan-live-panel span {
+  margin-bottom: 5px;
+  font-size: 0.7rem;
+}
+
+.compact-mode .scan-live-panel strong {
+  font-size: 1.02rem;
+}
+
+.compact-mode .scan-history {
+  gap: 7px;
+  margin: 0 16px 14px;
+  padding: 10px;
+}
+
+.compact-mode .scan-history-meta,
+.compact-mode .scan-history-note {
+  line-height: 1.35;
+}
+
+.compact-mode .secondary-button {
+  padding: 8px 10px;
+}
+
+.compact-mode .stats-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.compact-mode .stat-card {
+  min-height: 78px;
+  padding: 11px;
+}
+
+.compact-mode .stat-card span {
+  margin-bottom: 7px;
+  font-size: 0.7rem;
+}
+
+.compact-mode .stat-card strong {
+  font-size: 1.05rem;
+}
+
+.compact-mode .stat-card small {
+  margin-top: 6px;
+  font-size: 0.78rem;
+}
+
+.compact-mode .chart-grid {
+  gap: 12px;
+}
+
+.compact-mode .chart-section,
+.compact-mode .table-section {
+  margin-top: 12px;
+}
+
+.compact-mode .chart-frame {
+  height: 260px;
+  padding: 14px;
+}
+
+.compact-mode .compact-chart {
+  height: 220px;
+}
+
+.compact-mode .empty-chart,
+.compact-mode .collapsed-summary {
+  padding: 10px 16px;
+}
+
+.compact-mode th,
+.compact-mode td {
+  padding: 10px 14px;
+}
+
+.compact-mode th {
+  font-size: 0.74rem;
+}
+
+.compact-mode td {
+  font-size: 0.9rem;
 }
 
 @keyframes spin {

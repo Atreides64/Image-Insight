@@ -140,6 +140,7 @@ const API_BASE_URL =
 const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted", "cancelled"];
 const PHOTO_SEARCH_LIMIT = 25;
 const DASHBOARD_PREFERENCES_STORAGE_KEY = "image-insight-dashboard-preferences";
+const COMPACT_DASHBOARD_STORAGE_KEY = "image-insight-compact-dashboard";
 const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   showTotalPhotosCard: true,
   showTotalSizeCard: true,
@@ -280,6 +281,18 @@ function loadDashboardPreferences(): DashboardPreferences {
   }
 }
 
+function loadCompactDashboardPreference(): boolean {
+  try {
+    const storedPreference = window.localStorage.getItem(
+      COMPACT_DASHBOARD_STORAGE_KEY,
+    );
+
+    return storedPreference === null ? true : storedPreference === "true";
+  } catch {
+    return true;
+  }
+}
+
 function topLabel(rows: CountRow[]): string {
   return rows[0]?.label ?? "No data yet";
 }
@@ -338,6 +351,23 @@ function formatScanSpeed(value: number | null | undefined): string {
   })} files/sec`;
 }
 
+function formatScanSummary(status: ScanStatus): string {
+  const summary = `${status.image_files_matched.toLocaleString()} matched, ${status.new_files.toLocaleString()} new, ${status.updated_files.toLocaleString()} updated, ${status.skipped_files.toLocaleString()} skipped, ${status.failed_files.toLocaleString()} failed at ${formatScanSpeed(status.scan_speed_files_per_second)}.`;
+
+  switch (status.status) {
+    case "completed":
+      return `Scan complete for ${status.folder_path}. ${summary}`;
+    case "cancelled":
+      return `Scan cancelled for ${status.folder_path}. ${summary}`;
+    case "failed":
+      return `Scan failed for ${status.folder_path}. ${status.last_error ?? summary}`;
+    case "interrupted":
+      return `Scan interrupted for ${status.folder_path}. ${status.last_error ?? summary}`;
+    default:
+      return `Scan stopped for ${status.folder_path}. ${summary}`;
+  }
+}
+
 function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
@@ -345,6 +375,9 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [dashboardPreferences, setDashboardPreferences] =
     useState<DashboardPreferences>(loadDashboardPreferences);
+  const [isCompactDashboard, setIsCompactDashboard] = useState(
+    loadCompactDashboardPreference,
+  );
   const [folderPath, setFolderPath] = useState("");
   const [refreshMetadata, setRefreshMetadata] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -352,6 +385,7 @@ function App() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [lastScanSession, setLastScanSession] = useState<ScanSession | null>(null);
   const [scanHistory, setScanHistory] = useState<ScanSession[]>([]);
+  const [isScanHistoryExpanded, setIsScanHistoryExpanded] = useState(false);
   const [activeScanId, setActiveScanId] = useState<number | null>(null);
   const [activeScanStatus, setActiveScanStatus] = useState<ScanStatus | null>(null);
   const [photoSearchFilters, setPhotoSearchFilters] = useState<PhotoSearchFilters>({
@@ -365,6 +399,8 @@ function App() {
   const [photoSearch, setPhotoSearch] = useState<PhotoSearchResponse | null>(null);
   const [isSearchingPhotos, setIsSearchingPhotos] = useState(false);
   const [photoSearchError, setPhotoSearchError] = useState<string | null>(null);
+  const [copiedDatabasePath, setCopiedDatabasePath] = useState(false);
+  const [copiedPhotoId, setCopiedPhotoId] = useState<number | null>(null);
 
   const loadStats = useCallback(async () => {
     try {
@@ -498,6 +534,13 @@ function App() {
   }, [dashboardPreferences]);
 
   useEffect(() => {
+    window.localStorage.setItem(
+      COMPACT_DASHBOARD_STORAGE_KEY,
+      String(isCompactDashboard),
+    );
+  }, [isCompactDashboard]);
+
+  useEffect(() => {
     void loadLatestScanSession(folderPath);
   }, [folderPath, loadLatestScanSession]);
 
@@ -532,25 +575,12 @@ function App() {
           await loadSystemInfo();
 
           if (status.status === "completed") {
-            const failedFilesMessage =
-              status.failed_files > 0
-                ? ` ${status.failed_files.toLocaleString()} could not be read this pass.`
-                : "";
-
-            setScanMessage(
-              `Scan complete for ${status.folder_path}. ${status.image_files_matched.toLocaleString()} image files matched, ${status.new_files.toLocaleString()} new, ${status.updated_files.toLocaleString()} updated, ${status.skipped_files.toLocaleString()} skipped in ${status.elapsed_seconds.toFixed(2)}s.${failedFilesMessage}`,
-            );
+            setScanMessage(formatScanSummary(status));
             await loadStats();
           } else if (status.status === "cancelled") {
-            setScanMessage(
-              `Scan cancelled for ${status.folder_path}. ${status.image_files_matched.toLocaleString()} image files matched before it stopped.`,
-            );
+            setScanMessage(formatScanSummary(status));
           } else {
-            setScanError(
-              status.last_error
-                ? `The scan stopped before finishing. ${status.last_error}`
-                : "The scan stopped before finishing.",
-            );
+            setScanError(formatScanSummary(status));
           }
         }
       } catch (caughtError) {
@@ -697,6 +727,30 @@ function App() {
     }));
   }
 
+  async function copyDatabasePath() {
+    if (!systemInfo) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(systemInfo.database_path);
+      setCopiedDatabasePath(true);
+      window.setTimeout(() => setCopiedDatabasePath(false), 1800);
+    } catch {
+      setError("Could not copy the database path from this browser.");
+    }
+  }
+
+  async function copyPhotoPath(photo: PhotoSearchResult) {
+    try {
+      await navigator.clipboard.writeText(photo.path);
+      setCopiedPhotoId(photo.id);
+      window.setTimeout(() => setCopiedPhotoId(null), 1800);
+    } catch {
+      setPhotoSearchError("Could not copy the file path from this browser.");
+    }
+  }
+
   const fileTypeRows = useMemo(() => {
     if (!stats) {
       return [];
@@ -751,6 +805,15 @@ function App() {
     dashboardPreferences.showMetadataSearchSection,
     dashboardPreferences.showFileTypeTable,
   ].filter(Boolean).length;
+  const hasNoStatsYet = stats !== null && stats.total_photos === 0;
+  const hasNoExifData =
+    stats !== null &&
+    stats.total_photos > 0 &&
+    stats.top_cameras.length === 0 &&
+    stats.top_lenses.length === 0 &&
+    stats.top_focal_lengths.length === 0;
+  const hasNoTimelineData =
+    stats !== null && stats.total_photos > 0 && stats.photo_timeline.length === 0;
 
   const canResumeLastScan =
     lastScanSession !== null &&
@@ -758,9 +821,10 @@ function App() {
 
   const canResumeScan = (scanSession: ScanSession) =>
     ["failed", "interrupted"].includes(scanSession.status);
+  const latestScanHistoryItem = scanHistory[0] ?? null;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${isCompactDashboard ? " compact-mode" : ""}`}>
       <section className="page-header">
         <div>
           <p className="eyebrow">Image Insight</p>
@@ -787,7 +851,16 @@ function App() {
           <dl className="system-info-grid">
             <div>
               <dt>Database</dt>
-              <dd>{systemInfo.database_path}</dd>
+              <dd>
+                <span>{systemInfo.database_path}</span>
+                <button
+                  type="button"
+                  className="inline-action-button"
+                  onClick={() => void copyDatabasePath()}
+                >
+                  {copiedDatabasePath ? "Copied" : "Copy"}
+                </button>
+              </dd>
             </div>
             <div>
               <dt>Photos</dt>
@@ -808,7 +881,19 @@ function App() {
       <section className="customize-section" aria-labelledby="customize-heading">
         <div className="section-heading">
           <h2 id="customize-heading">Customize Dashboard</h2>
-          <span>{visibleCardCount + visibleInsightCount} visible items</span>
+          <div className="section-actions">
+            <label className="compact-toggle">
+              <input
+                type="checkbox"
+                checked={isCompactDashboard}
+                onChange={(event) =>
+                  setIsCompactDashboard(event.target.checked)
+                }
+              />
+              Compact mode
+            </label>
+            <span>{visibleCardCount + visibleInsightCount} visible items</span>
+          </div>
         </div>
         <div className="customize-grid">
           <div className="customize-group">
@@ -1035,7 +1120,7 @@ function App() {
           <div className="scan-progress" role="status" aria-live="polite">
             <span className="spinner" aria-hidden="true" />
             <span>
-              Scanning folder in the background... dashboard updates every few seconds.
+              Scan running in the background. Progress updates every few seconds.
             </span>
             <span className="scan-progress-detail">
               {(activeScanStatus?.exiftool_available ??
@@ -1104,9 +1189,39 @@ function App() {
       <section className="table-section">
         <div className="section-heading">
           <h2>Scan History</h2>
-          <span>{scanHistory.length.toLocaleString()} recent scans</span>
+          <div className="section-actions">
+            <span>{scanHistory.length.toLocaleString()} recent scans</span>
+            <button
+              type="button"
+              className="small-action-button"
+              onClick={() =>
+                setIsScanHistoryExpanded((currentValue) => !currentValue)
+              }
+            >
+              {isScanHistoryExpanded ? "Collapse" : "Expand"}
+            </button>
+          </div>
         </div>
 
+        {!isScanHistoryExpanded && (
+          <div className="collapsed-summary">
+            {latestScanHistoryItem ? (
+              <>
+                <strong>{formatScanStatus(latestScanHistoryItem.status)}</strong>
+                <span>{latestScanHistoryItem.folder_path}</span>
+                <span>
+                  {latestScanHistoryItem.image_files_matched.toLocaleString()} matched,{" "}
+                  {latestScanHistoryItem.updated_files.toLocaleString()} updated,{" "}
+                  {latestScanHistoryItem.failed_files.toLocaleString()} failed
+                </span>
+              </>
+            ) : (
+              <span>No scan history yet. Start with a local photo folder above.</span>
+            )}
+          </div>
+        )}
+
+        {isScanHistoryExpanded && (
         <table>
           <thead>
             <tr>
@@ -1173,11 +1288,14 @@ function App() {
               ))
             ) : (
               <tr>
-                <td colSpan={7}>No scan history yet.</td>
+                <td colSpan={7}>
+                  No scan history yet. Start with a local photo folder above.
+                </td>
               </tr>
             )}
           </tbody>
         </table>
+        )}
       </section>
       )}
 
@@ -1282,6 +1400,7 @@ function App() {
                   <th>Lens</th>
                   <th>Focal</th>
                   <th>Date Taken</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -1293,11 +1412,23 @@ function App() {
                       <td>{formatOptional(photo.lens_model)}</td>
                       <td>{formatFocalLength(photo.focal_length)}</td>
                       <td>{formatDate(photo.date_taken)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="small-action-button"
+                          onClick={() => void copyPhotoPath(photo)}
+                        >
+                          {copiedPhotoId === photo.id ? "Copied" : "Copy Path"}
+                        </button>
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5}>No matching photos.</td>
+                    <td colSpan={6}>
+                      No matching photos. Try clearing a filter or widening the date
+                      or focal length range.
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -1309,6 +1440,27 @@ function App() {
 
       {stats && (
         <>
+          {hasNoStatsYet && (
+            <p className="state-message">
+              No photo stats yet. Run your first scan to populate library totals,
+              EXIF insights, charts, and search results.
+            </p>
+          )}
+
+          {hasNoExifData && (
+            <p className="state-message">
+              Photos are indexed, but no camera, lens, or focal-length EXIF data
+              has been found yet.
+            </p>
+          )}
+
+          {hasNoTimelineData && (
+            <p className="state-message">
+              Timeline data is empty because indexed photos do not have capture
+              dates yet.
+            </p>
+          )}
+
           {showAnyStatCard && (
             <section className="stats-grid" aria-label="Photo library stats">
               {dashboardPreferences.showTotalPhotosCard && (
