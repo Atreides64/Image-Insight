@@ -93,3 +93,4 @@ Open:
 - 2026-05-04: Added v0.3.0 background scan jobs with `POST /scan-folder`, `/scan-status/{scan_id}`, frontend polling, live counters, and duplicate running scan prevention.
 - 2026-05-04: Added v0.4.0 metadata search with `/photos/search`, backend filter tests, dashboard filter controls, and a simple results table.
 - 2026-05-04: Tightened `/photos/search` pagination safety with default `limit=50`, max cap 500, default `offset=0`, negative pagination errors, total-count response checks, and frontend requests capped below 500.
+- 2026-05-04: Re-ran local CI-equivalent checks for backend tests, frontend build, diff hygiene, generated-file status, search defaults, no-results UI, and docs alignment.
