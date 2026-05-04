@@ -78,6 +78,7 @@ h2 {
 
 .state-message,
 .error-panel,
+.customize-section,
 .scan-section,
 .search-section,
 .stat-card,
@@ -101,6 +102,37 @@ h2 {
   padding: 18px;
   color: #ffc5ce;
   background: #2a151c;
+}
+
+.customize-section {
+  border-radius: 8px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.customize-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px 22px;
+}
+
+.customize-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #d5dfed;
+  background: #101823;
+  font-weight: 700;
+}
+
+.customize-controls input {
+  width: 16px;
+  height: 16px;
+  accent-color: #6fd3b8;
 }
 
 .scan-section {
