@@ -178,7 +178,11 @@ To point it somewhere else, create `frontend/.env.local`:
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
+The dashboard includes a local "Customize Dashboard" panel. Users can toggle
+summary cards, EXIF cards, and charts, and those preferences are saved in
+browser `localStorage` on that device.
+
 ## Status
 
-v0.5.0 adds recent scan history in the API and dashboard. Duplicates, maps, and
+v0.6.0 adds local dashboard customization controls. Duplicates, maps, and
 external job services remain future work.
