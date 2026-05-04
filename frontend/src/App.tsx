@@ -4,16 +4,29 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 
+type CountRow = {
+  label: string;
+  count: number;
+};
+
 type Stats = {
   total_photos: number;
   total_size_bytes: number;
   file_type_counts: Record<string, number>;
+  top_cameras: CountRow[];
+  top_lenses: CountRow[];
+  top_focal_lengths: CountRow[];
+  photos_by_year: CountRow[];
+  photos_by_month: CountRow[];
+  busiest_date: CountRow | null;
   newest_modified_at: string | null;
   oldest_modified_at: string | null;
 };
@@ -67,6 +80,24 @@ function formatDate(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatCalendarDate(value: string | null): string {
+  if (!value) {
+    return "No data yet";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+  }).format(new Date(`${value}T00:00:00`));
+}
+
+function topLabel(rows: CountRow[]): string {
+  return rows[0]?.label ?? "No data yet";
+}
+
+function topCount(rows: CountRow[]): string | null {
+  return rows[0] ? `${rows[0].count.toLocaleString()} photos` : null;
 }
 
 function formatScanStatus(status: string): string {
@@ -226,6 +257,9 @@ function App() {
       })),
     [fileTypeRows],
   );
+  const cameraChartData = stats?.top_cameras.slice(0, 8) ?? [];
+  const lensChartData = stats?.top_lenses.slice(0, 8) ?? [];
+  const timelineChartData = stats?.photos_by_month ?? [];
 
   const canResumeLastScan =
     lastScanSession !== null &&
@@ -343,6 +377,101 @@ function App() {
               <span>Oldest Date</span>
               <strong>{formatDate(stats.oldest_modified_at)}</strong>
             </article>
+            <article className="stat-card">
+              <span>Favorite Camera</span>
+              <strong>{topLabel(stats.top_cameras)}</strong>
+              {topCount(stats.top_cameras) && <small>{topCount(stats.top_cameras)}</small>}
+            </article>
+            <article className="stat-card">
+              <span>Favorite Lens</span>
+              <strong>{topLabel(stats.top_lenses)}</strong>
+              {topCount(stats.top_lenses) && <small>{topCount(stats.top_lenses)}</small>}
+            </article>
+            <article className="stat-card">
+              <span>Most Used Focal Length</span>
+              <strong>{topLabel(stats.top_focal_lengths)}</strong>
+              {topCount(stats.top_focal_lengths) && (
+                <small>{topCount(stats.top_focal_lengths)}</small>
+              )}
+            </article>
+            <article className="stat-card">
+              <span>Busiest Date</span>
+              <strong>{formatCalendarDate(stats.busiest_date?.label ?? null)}</strong>
+              {stats.busiest_date && (
+                <small>{stats.busiest_date.count.toLocaleString()} photos</small>
+              )}
+            </article>
+          </section>
+
+          <div className="chart-grid">
+            <section className="chart-section">
+              <div className="section-heading">
+                <h2>Camera Usage</h2>
+                <span>{cameraChartData.length} cameras</span>
+              </div>
+
+              {cameraChartData.length > 0 ? (
+                <div className="chart-frame">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={cameraChartData}>
+                      <CartesianGrid stroke="#273244" vertical={false} />
+                      <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                      <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                      <Tooltip cursor={{ fill: "rgba(111, 211, 184, 0.08)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                      <Bar dataKey="count" fill="#6fd3b8" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <p className="empty-chart">Run a scan with EXIF data to populate camera usage.</p>
+              )}
+            </section>
+
+            <section className="chart-section">
+              <div className="section-heading">
+                <h2>Lens Usage</h2>
+                <span>{lensChartData.length} lenses</span>
+              </div>
+
+              {lensChartData.length > 0 ? (
+                <div className="chart-frame">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={lensChartData}>
+                      <CartesianGrid stroke="#273244" vertical={false} />
+                      <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                      <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                      <Tooltip cursor={{ fill: "rgba(111, 211, 184, 0.08)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                      <Bar dataKey="count" fill="#8fb6ff" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <p className="empty-chart">Run a scan with EXIF data to populate lens usage.</p>
+              )}
+            </section>
+          </div>
+
+          <section className="chart-section">
+            <div className="section-heading">
+              <h2>Timeline</h2>
+              <span>{timelineChartData.length} months</span>
+            </div>
+
+            {timelineChartData.length > 0 ? (
+              <div className="chart-frame">
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={timelineChartData}>
+                    <CartesianGrid stroke="#273244" vertical={false} />
+                    <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                    <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                    <Line type="monotone" dataKey="count" stroke="#f0c66a" strokeWidth={3} dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p className="empty-chart">Run a scan with capture dates to populate the timeline.</p>
+            )}
           </section>
 
           <section className="chart-section">
@@ -352,36 +481,14 @@ function App() {
             </div>
 
             {fileTypeChartData.length > 0 ? (
-              <div className="chart-frame">
-                <ResponsiveContainer width="100%" height={280}>
+              <div className="chart-frame compact-chart">
+                <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={fileTypeChartData}>
                     <CartesianGrid stroke="#273244" vertical={false} />
-                    <XAxis
-                      dataKey="extension"
-                      stroke="#a7b3c6"
-                      tickLine={false}
-                      axisLine={false}
-                    />
-                    <YAxis
-                      allowDecimals={false}
-                      stroke="#a7b3c6"
-                      tickLine={false}
-                      axisLine={false}
-                    />
-                    <Tooltip
-                      cursor={{ fill: "rgba(111, 211, 184, 0.08)" }}
-                      contentStyle={{
-                        background: "#121a26",
-                        border: "1px solid #2f3d52",
-                        borderRadius: "8px",
-                        color: "#edf5ff",
-                      }}
-                    />
-                    <Bar
-                      dataKey="count"
-                      fill="#6fd3b8"
-                      radius={[6, 6, 0, 0]}
-                    />
+                    <XAxis dataKey="extension" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                    <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                    <Tooltip cursor={{ fill: "rgba(111, 211, 184, 0.08)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                    <Bar dataKey="count" fill="#6fd3b8" radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

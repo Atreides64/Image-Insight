@@ -1,19 +1,28 @@
 # Current Project State
 
-Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/scan-sessions`, `/scan-sessions/{scan_id}`, `/photos`, and `/stats`. `/scan-folder` still returns a concise summary by default, but now also creates durable scan session records in SQLite and supports `resume=true` for the latest failed or interrupted scan on the same folder. Resumed scans reuse the same `scan_id`, preserve committed session state, skip already committed file work when possible, and still count unchanged files as `skipped_files` rather than `updated_files`. Scans stream directly over the recursive folder walk, upsert records into SQLite at the repo-root `image_insight.db`, commit writes every 500 matched image files, and print progress counters to the terminal during long runs. A lightweight pytest suite now covers health, stats, scan session creation, completed scans, failed/interrupted resume flows, and unchanged-after-resume skip behavior against a temporary SQLite database. The React/Vite dashboard fetches `/stats`, shows summary cards, displays a Recharts file-type bar chart, includes a scan form that calls `/scan-folder`, shows the latest scan session state for the entered folder, and offers a calm resume action when the last scan did not complete cleanly.
+Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/scan-sessions`, `/scan-sessions/{scan_id}`, `/photos`, and `/stats`. `/scan-folder` still returns a concise summary by default, creates durable scan session records in SQLite, and supports `resume=true` for the latest failed or interrupted scan on the same folder. Scans now extract best-effort EXIF metadata for camera make/model, lens model, focal length, ISO, aperture, shutter speed, and capture date while allowing missing or unreadable EXIF to scan cleanly. Resumed scans reuse the same `scan_id`, preserve committed session state, skip already committed file work when possible, and still count unchanged files as `skipped_files` rather than `updated_files`. Scans stream directly over the recursive folder walk, upsert records into SQLite at the repo-root `image_insight.db`, commit writes every 500 matched image files, and print progress counters to the terminal during long runs. A lightweight pytest suite now covers health, stats, EXIF extraction, scan session creation, completed scans, failed/interrupted resume flows, and unchanged-after-resume skip behavior against a temporary SQLite database. The React/Vite dashboard fetches `/stats`, shows summary and EXIF insight cards, displays Recharts charts for camera usage, lens usage, capture timeline, and file types, includes a scan form that calls `/scan-folder`, shows the latest scan session state for the entered folder, and offers a calm resume action when the last scan did not complete cleanly.
 
 # Files Changed This Session
 
-- Modified `app/main.py` to add durable scan session tracking, resume support, and `/scan-sessions` endpoints while keeping `/scan-folder` backward compatible.
-- Modified `app/models.py` to add `scan_sessions` and `scan_session_files` tables.
-- Modified `tests/test_api.py` to cover scan session creation, completed scans, failed/interrupted resume flows, and unchanged-after-resume skip behavior.
-- Modified `frontend/src/App.tsx` to show the latest scan session for the entered folder and offer a resume action when the last scan was interrupted or failed.
-- Modified `frontend/src/styles.css` to style the previous scan status panel and resume button.
+- Modified `app/models.py` to add nullable EXIF columns on `photos`.
+- Modified `app/main.py` to add best-effort Pillow EXIF extraction, lightweight SQLite column backfill for existing local databases, v0.2.0 API metadata, and EXIF analytics in `/stats`.
+- Modified `tests/test_api.py` to cover EXIF extraction and the expanded stats payload.
+- Modified `frontend/src/App.tsx` to add Favorite Camera, Favorite Lens, Most Used Focal Length, Busiest Date, camera/lens usage charts, and a capture timeline chart.
+- Modified `frontend/src/styles.css` to support the expanded chart layout.
+- Modified `requirements.txt` to add Pillow.
+- Modified `.gitignore` to ignore pytest cache directories created during local test runs.
+- Added `pytest.ini`, backend CI `PYTHONPATH=.`, and a Python 3.12 CI pin so CI and local pytest runs can import the repo-root `app` package consistently.
 - Modified `README.md` and `docs/progress.md`.
 
 # Decisions Made
 
 - Keep `/scan-folder` synchronous for now, but persist each scan as a durable session record with resumable states.
+- Use Pillow for best-effort EXIF extraction during scans; EXIF parse failures return null metadata instead of failing the file or scan.
+- Store capture date as UTC because EXIF dates often lack timezone information.
+- Add a small startup SQLite column check for the new nullable `photos` EXIF columns because the project does not have migrations yet.
+- Keep `/stats` as the dashboard data source for v0.2.0 analytics instead of adding a separate analytics endpoint.
+- Use `pytest.ini` with `pythonpath = .` plus backend CI `PYTHONPATH=.` instead of editable package installation because the project does not yet have Python packaging metadata.
+- Pin backend CI to Python 3.12 instead of floating `3.x` so CI does not jump to the newest interpreter before dependencies publish wheels.
 - Reuse the same `scan_id` when resuming the latest failed or interrupted scan for a folder.
 - Track processed file paths per scan session so resumed scans can skip already committed file work.
 - Reset per-run counters when resuming, while preserving the session record and previous stop reason.
@@ -26,6 +35,7 @@ Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/scan-sessi
 - `/scan-folder` is still a single request/response flow, so very large archives can still run into browser or proxy timeout limits even though session progress is committed in batches and resume is available afterward.
 - Resume currently reuses the latest resumable session for a folder rather than supporting multiple parallel in-flight scans for the same path.
 - The frontend production bundle still triggers Vite's 500 kB chunk-size warning because the dashboard ships Recharts in a single main bundle.
+- EXIF capture dates are interpreted as UTC when the image does not provide timezone data.
 
 # Next Best Task
 
@@ -74,3 +84,7 @@ Open:
 - 2026-05-03: Improved `/scan-folder` scan semantics with explicit counters, repo-root SQLite visibility, and batch commits every 500 matched image files.
 - 2026-05-03: Preserved streaming scan iteration, counted unchanged rescans as skipped, and surfaced failed image reads in the dashboard scan summary.
 - 2026-05-03: Added resumable scan sessions, session inspection endpoints, and frontend resume controls for interrupted or failed scans.
+- 2026-05-04: Added v0.2.0 EXIF analytics with camera/lens/focal length metadata, capture timeline stats, dashboard insight cards, and camera/lens/timeline charts.
+- 2026-05-04: Updated backend CI to install Ubuntu JPEG/zlib development libraries before Python dependencies so Pillow can build when wheels are unavailable.
+- 2026-05-04: Added pytest repo-root import configuration, backend CI `PYTHONPATH=.`, and Python 3.12 pin to fix `ModuleNotFoundError: No module named 'app'` and avoid latest-Python dependency churn.
+- 2026-05-04: Ran branch stability checks: backend pytest passes locally, frontend production build passes, and `git diff --check` reports no whitespace errors.

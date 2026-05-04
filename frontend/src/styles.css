@@ -319,6 +319,12 @@ h2 {
   overflow: hidden;
 }
 
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
 .section-heading {
   display: flex;
   align-items: center;
@@ -336,6 +342,10 @@ h2 {
 .chart-frame {
   height: 320px;
   padding: 22px;
+}
+
+.compact-chart {
+  height: 280px;
 }
 
 .empty-chart {
@@ -379,6 +389,10 @@ td:first-child {
 @media (max-width: 860px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chart-grid {
+    grid-template-columns: 1fr;
   }
 }
 

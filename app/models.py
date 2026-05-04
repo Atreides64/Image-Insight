@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -16,6 +16,14 @@ class Photo(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    camera_make: Mapped[str | None] = mapped_column(String, nullable=True)
+    camera_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    lens_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    focal_length: Mapped[float | None] = mapped_column(Float, nullable=True)
+    iso: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    aperture: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shutter_speed: Mapped[str | None] = mapped_column(String, nullable=True)
+    date_taken: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ScanSession(Base):

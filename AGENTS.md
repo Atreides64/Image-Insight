@@ -44,7 +44,10 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - The frontend fetches the backend from `VITE_API_BASE_URL`, defaulting to `http://127.0.0.1:8000`.
 - CORS is enabled for the Vite dev server on `localhost:5173` and `127.0.0.1:5173`.
 - Tests set `IMAGE_INSIGHT_DATABASE_URL` before importing the app so they use a temporary SQLite database.
+- Pytest uses repo-root imports via `pytest.ini` with `pythonpath = .`; CI also sets `PYTHONPATH=.` for the backend job.
 - CI lives in `.github/workflows/ci.yml` with separate backend and frontend jobs for faster feedback.
+- The backend CI job installs Ubuntu `libjpeg-dev` and `zlib1g-dev` before Python dependencies so Pillow can build if a wheel is unavailable.
+- The backend CI job pins Python to 3.12.
 - Frontend TypeScript uses `moduleResolution: "bundler"` and routes build cache/output noise into ignored paths so `npm run build` stays CI-safe.
 
 ## Common Run Commands
