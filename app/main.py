@@ -1,6 +1,6 @@
 import time
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, time as datetime_time, timezone
 from pathlib import Path
 from threading import Thread
 
@@ -28,7 +28,7 @@ RESUMABLE_SCAN_STATUSES = {"running", "interrupted", "failed"}
 app = FastAPI(
     title="Image Insight API",
     description="Backend API for local-first media metadata analytics.",
-    version="0.3.0",
+    version="0.4.0",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -122,6 +122,33 @@ def parse_exif_datetime(value: object) -> datetime | None:
             continue
 
     return None
+
+
+def parse_search_datetime(value: str | None, *, end_of_day: bool) -> datetime | None:
+    if not value:
+        return None
+
+    stripped_value = value.strip()
+
+    if not stripped_value:
+        return None
+
+    try:
+        if "T" not in stripped_value and len(stripped_value) == 10:
+            parsed_date = datetime.fromisoformat(stripped_value).date()
+            parsed_datetime = datetime.combine(
+                parsed_date,
+                datetime_time.max if end_of_day else datetime_time.min,
+            )
+        else:
+            parsed_datetime = datetime.fromisoformat(stripped_value)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid date value: {value}",
+        ) from error
+
+    return normalize_datetime(parsed_datetime)
 
 
 def exif_value(exif, tag_name: str) -> object:
@@ -714,6 +741,83 @@ def get_scan_status(scan_id: int) -> dict[str, object]:
         raise HTTPException(status_code=404, detail=f"Scan session not found: {scan_id}")
 
     return format_scan_status(scan_session)
+
+
+@app.get("/photos/search")
+def search_photos(
+    camera_model: str | None = None,
+    lens_model: str | None = None,
+    min_focal_length: float | None = None,
+    max_focal_length: float | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    extension: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, object]:
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be 0 or greater")
+
+    parsed_date_from = parse_search_datetime(date_from, end_of_day=False)
+    parsed_date_to = parse_search_datetime(date_to, end_of_day=True)
+    normalized_camera_model = camera_model.strip() if camera_model else None
+    normalized_lens_model = lens_model.strip() if lens_model else None
+    normalized_extension = extension.strip().lower().lstrip(".") if extension else None
+
+    if parsed_date_from and parsed_date_to and parsed_date_from > parsed_date_to:
+        raise HTTPException(status_code=400, detail="date_from must be before date_to")
+
+    if (
+        min_focal_length is not None
+        and max_focal_length is not None
+        and min_focal_length > max_focal_length
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="min_focal_length must be less than or equal to max_focal_length",
+        )
+
+    with SessionLocal() as session:
+        query = session.query(Photo)
+
+        if normalized_camera_model:
+            query = query.filter(Photo.camera_model.ilike(f"%{normalized_camera_model}%"))
+
+        if normalized_lens_model:
+            query = query.filter(Photo.lens_model.ilike(f"%{normalized_lens_model}%"))
+
+        if min_focal_length is not None:
+            query = query.filter(Photo.focal_length >= min_focal_length)
+
+        if max_focal_length is not None:
+            query = query.filter(Photo.focal_length <= max_focal_length)
+
+        if parsed_date_from:
+            query = query.filter(Photo.date_taken >= parsed_date_from)
+
+        if parsed_date_to:
+            query = query.filter(Photo.date_taken <= parsed_date_to)
+
+        if normalized_extension:
+            query = query.filter(Photo.extension == normalized_extension)
+
+        total_count = query.count()
+        photos = (
+            query.order_by(Photo.date_taken.desc(), Photo.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+    return {
+        "total_count": total_count,
+        "limit": limit,
+        "offset": offset,
+        "results": [format_photo(photo) for photo in photos],
+    }
 
 
 @app.get("/photos")
