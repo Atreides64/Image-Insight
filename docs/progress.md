@@ -11,6 +11,7 @@ Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/scan-sessi
 - Modified `frontend/src/styles.css` to support the expanded chart layout.
 - Modified `requirements.txt` to add Pillow.
 - Modified `.gitignore` to ignore pytest cache directories created during local test runs.
+- Added `pytest.ini`, backend CI `PYTHONPATH=.`, and a Python 3.12 CI pin so CI and local pytest runs can import the repo-root `app` package consistently.
 - Modified `README.md` and `docs/progress.md`.
 
 # Decisions Made
@@ -20,6 +21,8 @@ Image Insight has a FastAPI backend with `/health`, `/scan-folder`, `/scan-sessi
 - Store capture date as UTC because EXIF dates often lack timezone information.
 - Add a small startup SQLite column check for the new nullable `photos` EXIF columns because the project does not have migrations yet.
 - Keep `/stats` as the dashboard data source for v0.2.0 analytics instead of adding a separate analytics endpoint.
+- Use `pytest.ini` with `pythonpath = .` plus backend CI `PYTHONPATH=.` instead of editable package installation because the project does not yet have Python packaging metadata.
+- Pin backend CI to Python 3.12 instead of floating `3.x` so CI does not jump to the newest interpreter before dependencies publish wheels.
 - Reuse the same `scan_id` when resuming the latest failed or interrupted scan for a folder.
 - Track processed file paths per scan session so resumed scans can skip already committed file work.
 - Reset per-run counters when resuming, while preserving the session record and previous stop reason.
@@ -83,3 +86,4 @@ Open:
 - 2026-05-03: Added resumable scan sessions, session inspection endpoints, and frontend resume controls for interrupted or failed scans.
 - 2026-05-04: Added v0.2.0 EXIF analytics with camera/lens/focal length metadata, capture timeline stats, dashboard insight cards, and camera/lens/timeline charts.
 - 2026-05-04: Updated backend CI to install Ubuntu JPEG/zlib development libraries before Python dependencies so Pillow can build when wheels are unavailable.
+- 2026-05-04: Added pytest repo-root import configuration, backend CI `PYTHONPATH=.`, and Python 3.12 pin to fix `ModuleNotFoundError: No module named 'app'` and avoid latest-Python dependency churn.
