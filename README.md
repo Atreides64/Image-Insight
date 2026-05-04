@@ -53,12 +53,13 @@ uvicorn app.main:app --reload
 
 The backend creates a local SQLite database at the repo root as `image_insight.db` automatically.
 
-Image Insight v0.2.0 extracts EXIF metadata when it is available and stores
+Image Insight extracts EXIF metadata when it is available and stores
 camera make/model, lens model, focal length, ISO, aperture, shutter speed, and
 capture date. Missing or unreadable EXIF data is ignored so scans can continue.
 
-`/scan-folder` returns a concise scan summary by default. To include the full
-file list in the response, pass `include_files=true`.
+`POST /scan-folder` starts a lightweight background scan job and returns a
+`scan_id` quickly. The scan continues in a Python thread and writes progress to
+the existing SQLite scan session record.
 
 Scans stream directly over `Path.rglob("*")`, commit database changes every 500
 matched image files, and treat unchanged existing rows as `skipped_files`
@@ -66,12 +67,26 @@ instead of `updated_files`.
 
 Use `resume=true` to resume the latest failed or interrupted scan session for
 the same folder without redoing already committed file work unnecessarily.
+Starting a second scan for the same folder while one is already running returns
+a conflict instead of creating duplicate work.
 
-Default `/scan-folder` summary fields:
+Start a scan:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/scan-folder?folder_path=/path/to/photos"
+```
+
+Poll scan progress:
+
+```bash
+curl "http://127.0.0.1:8000/scan-status/1"
+```
+
+`GET /scan-status/{scan_id}` returns:
 
 - `scan_id`
 - `status`
-- `total_files`
+- `folder_path`
 - `files_seen`
 - `image_files_matched`
 - `new_files`
@@ -79,13 +94,14 @@ Default `/scan-folder` summary fields:
 - `skipped_files`
 - `failed_files`
 - `elapsed_seconds`
-- `folder_path`
+- `last_error`
 
 Scan session endpoints:
 
 - `GET /scan-sessions`
 - `GET /scan-sessions?folder_path=/path/to/folder`
 - `GET /scan-sessions/{scan_id}`
+- `GET /scan-status/{scan_id}`
 
 Stats are available from `GET /stats` and include:
 
@@ -135,5 +151,5 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 ## Status
 
-v0.2.0 adds EXIF analytics for camera, lens, focal length, and capture timeline
-insights. Search, duplicates, maps, and background jobs remain future work.
+v0.3.0 adds lightweight background scan jobs and live dashboard progress.
+Search, duplicates, maps, and external job services remain future work.

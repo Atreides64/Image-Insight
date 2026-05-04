@@ -188,6 +188,35 @@ h2 {
   background: rgba(111, 211, 184, 0.12);
 }
 
+.scan-live-panel {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 22px 22px;
+}
+
+.scan-live-panel div {
+  min-height: 76px;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  padding: 12px;
+  background: #101823;
+}
+
+.scan-live-panel span {
+  display: block;
+  margin-bottom: 8px;
+  color: #a7b3c6;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.scan-live-panel strong {
+  display: block;
+  font-size: 1.2rem;
+}
+
 .scan-history {
   display: grid;
   gap: 10px;
@@ -394,6 +423,10 @@ td:first-child {
   .chart-grid {
     grid-template-columns: 1fr;
   }
+
+  .scan-live-panel {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
@@ -416,6 +449,10 @@ td:first-child {
 
   .scan-controls button {
     width: 100%;
+  }
+
+  .scan-live-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   th,
