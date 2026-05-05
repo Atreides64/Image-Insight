@@ -3,7 +3,10 @@ import type { FormEvent, ReactNode } from "react";
 import {
   Bar,
   BarChart,
+  Cell,
   CartesianGrid,
+  Pie,
+  PieChart,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -54,6 +57,11 @@ type Stats = {
   most_common_aperture: CountRow | null;
   most_common_shutter_speed: CountRow | null;
   average_file_size_by_camera: AverageFileSizeByCameraRow[];
+  top_capture_dates: CountRow[];
+  iso_distribution: CountRow[];
+  aperture_distribution: CountRow[];
+  shutter_speed_buckets: CountRow[];
+  focal_length_usage_over_time: UsageTimelineRow[];
   photos_with_capture_date: number;
   photos_missing_capture_date: number;
   photos_by_year: CountRow[];
@@ -71,16 +79,23 @@ type PhotoSearchResult = {
   filename: string;
   path: string;
   extension: string;
+  size_bytes: number;
   camera_model: string | null;
   lens_model: string | null;
   focal_length: number | null;
+  iso: number | null;
+  aperture: number | null;
+  shutter_speed: string | null;
   date_taken: string | null;
+  device_type: string;
 };
 
 type PhotoSearchResponse = {
   total_count: number;
   limit: number;
   offset: number;
+  sort_by: string;
+  sort_order: string;
   results: PhotoSearchResult[];
 };
 
@@ -96,9 +111,13 @@ type PhotoSearchFilters = {
   date_from: string;
   date_to: string;
   device_type: string;
+  sort_by: string;
+  sort_order: string;
 };
 
 type PhotoSearchOptions = {
+  camera_models?: string[];
+  lens_models?: string[];
   cameras: string[];
   lenses: string[];
   extensions: string[];
@@ -106,6 +125,25 @@ type PhotoSearchOptions = {
   aperture_values: number[];
   shutter_speed_values: string[];
   device_types: string[];
+};
+
+type AnalyticsResponse = {
+  x_axis: string;
+  metric: string;
+  group_by: string | null;
+  limit: number;
+  offset: number;
+  total_count: number;
+  series: string[];
+  rows: UsageTimelineRow[];
+};
+
+type AnalyticsFilters = {
+  x_axis: string;
+  metric: string;
+  group_by: string;
+  date_from: string;
+  date_to: string;
 };
 
 type DashboardPreferences = {
@@ -188,7 +226,7 @@ type ScanStatus = {
   last_error: string | null;
 };
 
-type ActiveTool = "scan" | "search" | null;
+type ActiveTool = "scan" | "search" | "analytics" | null;
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -196,7 +234,74 @@ const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted", "cancelled
 const PHOTO_SEARCH_LIMIT = 25;
 const DASHBOARD_PREFERENCES_STORAGE_KEY = "image-insight-dashboard-preferences";
 const COMPACT_DASHBOARD_STORAGE_KEY = "image-insight-compact-dashboard";
-const CHART_SERIES_COLORS = ["#7dd3fc", "#a987ff", "#fbbf24"];
+const SEARCH_COLUMNS_STORAGE_KEY = "image-insight-search-columns";
+const CHART_SERIES_COLORS = [
+  "#7dd3fc",
+  "#a987ff",
+  "#fbbf24",
+  "#4ade80",
+  "#f472b6",
+  "#fb7185",
+  "#38bdf8",
+  "#c084fc",
+  "#f97316",
+  "#2dd4bf",
+  "#e879f9",
+  "#a3e635",
+];
+const SEARCH_SORT_FIELDS = [
+  "date_taken",
+  "camera_model",
+  "lens_model",
+  "focal_length",
+  "iso",
+  "aperture",
+  "shutter_speed",
+  "size_bytes",
+  "extension",
+  "device_type",
+];
+const DEFAULT_SEARCH_COLUMNS = [
+  "filename",
+  "extension",
+  "size_bytes",
+  "camera_model",
+  "lens_model",
+  "focal_length",
+  "iso",
+  "aperture",
+  "shutter_speed",
+  "date_taken",
+  "device_type",
+];
+const SEARCH_COLUMN_LABELS: Record<string, string> = {
+  filename: "File",
+  extension: "Type",
+  size_bytes: "Size",
+  camera_model: "Camera",
+  lens_model: "Lens",
+  focal_length: "Focal",
+  iso: "ISO",
+  aperture: "Aperture",
+  shutter_speed: "Shutter",
+  date_taken: "Date Taken",
+  device_type: "Device",
+};
+const ANALYTICS_DIMENSIONS = [
+  "capture_month",
+  "capture_date",
+  "camera_model",
+  "lens_model",
+  "extension",
+  "device_type",
+  "iso",
+  "aperture",
+  "shutter_speed_bucket",
+  "focal_length_bucket",
+];
+const ANALYTICS_GROUP_BY = ["camera_model", "lens_model", "extension", "device_type"];
+const ANALYTICS_METRICS = ["photo_count", "avg_file_size", "total_file_size"];
+const ANALYTICS_TIME_DIMENSIONS = new Set(["capture_month", "capture_date"]);
 const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   showTotalPhotosCard: true,
   showTotalSizeCard: true,
@@ -268,6 +373,82 @@ function formatOptional(value: string | number | null): string {
 
 function formatFocalLength(value: number | null): string {
   return value === null ? "—" : `${value}mm`;
+}
+
+function formatSearchCell(photo: PhotoSearchResult, column: string): string {
+  if (column === "filename") {
+    return photo.filename;
+  }
+  if (column === "extension") {
+    return photo.extension.toUpperCase();
+  }
+  if (column === "size_bytes") {
+    return formatMegabytes(photo.size_bytes);
+  }
+  if (column === "camera_model") {
+    return formatOptional(photo.camera_model);
+  }
+  if (column === "lens_model") {
+    return formatOptional(photo.lens_model);
+  }
+  if (column === "focal_length") {
+    return formatFocalLength(photo.focal_length);
+  }
+  if (column === "iso") {
+    return formatOptional(photo.iso);
+  }
+  if (column === "aperture") {
+    return photo.aperture === null ? "—" : `f/${photo.aperture}`;
+  }
+  if (column === "shutter_speed") {
+    return formatOptional(photo.shutter_speed);
+  }
+  if (column === "date_taken") {
+    return formatDate(photo.date_taken);
+  }
+  if (column === "device_type") {
+    return photo.device_type;
+  }
+
+  return "";
+}
+
+type ChartTooltipPayload = {
+  name?: string | number;
+  value?: string | number;
+  color?: string;
+  stroke?: string;
+};
+
+function SeriesTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: ChartTooltipPayload[];
+  label?: string | number;
+}) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  return (
+    <div className="series-tooltip">
+      <strong>{label}</strong>
+      {payload
+        .filter((item) => item.value !== undefined && item.value !== null)
+        .map((item) => (
+          <span key={String(item.name)}>
+            <i
+              aria-hidden="true"
+              style={{ background: item.color ?? item.stroke ?? "#7dd3fc" }}
+            />
+            {item.name}: {item.value}
+          </span>
+        ))}
+    </div>
+  );
 }
 
 function loadDashboardPreferences(): DashboardPreferences {
@@ -398,6 +579,31 @@ function usageTimelineKeys(rows: UsageTimelineRow[]): string[] {
       rows.flatMap((row) => Object.keys(row).filter((key) => key !== "label")),
     ),
   );
+}
+
+function formatOptionLabel(value: string): string {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function loadSearchColumns(): string[] {
+  try {
+    const storedColumns = window.localStorage.getItem(SEARCH_COLUMNS_STORAGE_KEY);
+    if (!storedColumns) {
+      return DEFAULT_SEARCH_COLUMNS;
+    }
+
+    const parsedColumns = JSON.parse(storedColumns);
+    if (!Array.isArray(parsedColumns)) {
+      return DEFAULT_SEARCH_COLUMNS;
+    }
+
+    return parsedColumns.filter((column) => column in SEARCH_COLUMN_LABELS);
+  } catch {
+    return DEFAULT_SEARCH_COLUMNS;
+  }
 }
 
 function topStorageLabel(rows: SizeRow[]): string {
@@ -608,12 +814,27 @@ function App() {
     date_from: "",
     date_to: "",
     device_type: "",
+    sort_by: "date_taken",
+    sort_order: "desc",
   });
   const [photoSearch, setPhotoSearch] = useState<PhotoSearchResponse | null>(null);
   const [photoSearchOptions, setPhotoSearchOptions] =
     useState<PhotoSearchOptions | null>(null);
   const [isSearchingPhotos, setIsSearchingPhotos] = useState(false);
   const [photoSearchError, setPhotoSearchError] = useState<string | null>(null);
+  const [isSearchResultsOpen, setIsSearchResultsOpen] = useState(true);
+  const [visibleSearchColumns, setVisibleSearchColumns] =
+    useState<string[]>(loadSearchColumns);
+  const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilters>({
+    x_axis: "capture_month",
+    metric: "photo_count",
+    group_by: "",
+    date_from: "",
+    date_to: "",
+  });
+  const [analyticsResult, setAnalyticsResult] = useState<AnalyticsResponse | null>(null);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [copiedPhotoId, setCopiedPhotoId] = useState<number | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<ActiveTool>(null);
@@ -709,10 +930,10 @@ function App() {
     }
   }, []);
 
-  const runPhotoSearch = useCallback(async () => {
+  const runPhotoSearch = useCallback(async (offset = 0, append = false) => {
     const params = new URLSearchParams({
       limit: String(Math.min(PHOTO_SEARCH_LIMIT, 500)),
-      offset: "0",
+      offset: String(offset),
     });
 
     Object.entries(photoSearchFilters).forEach(([key, value]) => {
@@ -742,7 +963,16 @@ function App() {
         throw new Error(message);
       }
 
-      setPhotoSearch((await response.json()) as PhotoSearchResponse);
+      const nextSearch = (await response.json()) as PhotoSearchResponse;
+      setPhotoSearch((currentSearch) =>
+        append && currentSearch
+          ? {
+              ...nextSearch,
+              results: [...currentSearch.results, ...nextSearch.results],
+            }
+          : nextSearch,
+      );
+      setIsSearchResultsOpen(true);
     } catch (caughtError) {
       setPhotoSearchError(
         caughtError instanceof Error ? caughtError.message : "Unable to search photos.",
@@ -751,6 +981,55 @@ function App() {
       setIsSearchingPhotos(false);
     }
   }, [photoSearchFilters]);
+
+  const runAnalytics = useCallback(async (offset = 0) => {
+    const params = new URLSearchParams({
+      x_axis: analyticsFilters.x_axis,
+      metric: analyticsFilters.metric,
+      limit: analyticsFilters.x_axis === "capture_date" ? "250" : "50",
+      offset: String(offset),
+    });
+
+    if (analyticsFilters.group_by) {
+      params.set("group_by", analyticsFilters.group_by);
+    }
+    if (analyticsFilters.date_from) {
+      params.set("date_from", analyticsFilters.date_from);
+    }
+    if (analyticsFilters.date_to) {
+      params.set("date_to", analyticsFilters.date_to);
+    }
+
+    setIsLoadingAnalytics(true);
+    setAnalyticsError(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/analytics?${params}`);
+
+      if (!response.ok) {
+        let message = `Analytics request failed with ${response.status}`;
+
+        try {
+          const errorBody = await response.json();
+          message = errorBody.detail ?? message;
+        } catch {
+          // Keep the status-based message if the backend response is not JSON.
+        }
+
+        throw new Error(message);
+      }
+
+      setAnalyticsResult((await response.json()) as AnalyticsResponse);
+    } catch (caughtError) {
+      setAnalyticsError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to build analytics chart.",
+      );
+    } finally {
+      setIsLoadingAnalytics(false);
+    }
+  }, [analyticsFilters]);
 
   useEffect(() => {
     loadStats();
@@ -774,8 +1053,21 @@ function App() {
   }, [isCompactDashboard]);
 
   useEffect(() => {
+    window.localStorage.setItem(
+      SEARCH_COLUMNS_STORAGE_KEY,
+      JSON.stringify(visibleSearchColumns),
+    );
+  }, [visibleSearchColumns]);
+
+  useEffect(() => {
     void loadLatestScanSession(folderPath);
   }, [folderPath, loadLatestScanSession]);
+
+  useEffect(() => {
+    if (photoSearch) {
+      void runPhotoSearch(0, false);
+    }
+  }, [photoSearchFilters.sort_by, photoSearchFilters.sort_order]);
 
   useEffect(() => {
     if (activeScanId === null) {
@@ -953,7 +1245,7 @@ function App() {
 
   async function handlePhotoSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await runPhotoSearch();
+    await runPhotoSearch(0, false);
   }
 
   function updatePhotoSearchFilter(
@@ -964,6 +1256,24 @@ function App() {
       ...currentFilters,
       [key]: value,
     }));
+  }
+
+  function updateAnalyticsFilter(key: keyof AnalyticsFilters, value: string) {
+    setAnalyticsFilters((currentFilters) => ({
+      ...currentFilters,
+      [key]: value,
+      ...(key === "x_axis" && value === currentFilters.group_by
+        ? { group_by: "" }
+        : {}),
+    }));
+  }
+
+  function toggleSearchColumn(column: string) {
+    setVisibleSearchColumns((currentColumns) =>
+      currentColumns.includes(column)
+        ? currentColumns.filter((currentColumn) => currentColumn !== column)
+        : [...currentColumns, column],
+    );
   }
 
   async function copyPhotoPath(photo: PhotoSearchResult) {
@@ -1020,15 +1330,13 @@ function App() {
     );
   }, [stats]);
 
-  const fileTypeChartData = useMemo(
+  const fileTypeDistributionData = useMemo(
     () =>
-      (stats?.average_file_size_by_file_type ?? []).map((row) => ({
-        extension: row.label.toUpperCase(),
-        average_file_size_mb: Number(
-          (row.average_file_size_bytes / 1024 ** 2).toFixed(2),
-        ),
+      fileTypeRows.map(([extension, count]) => ({
+        extension: extension.toUpperCase(),
+        count,
       })),
-    [stats?.average_file_size_by_file_type],
+    [fileTypeRows],
   );
   const cameraChartData = stats?.top_cameras.slice(0, 8) ?? [];
   const lensChartData = stats?.top_lenses.slice(0, 8) ?? [];
@@ -1572,7 +1880,7 @@ function App() {
                             tick={{ fontSize: 11 }}
                           />
                           <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <Tooltip contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          <Tooltip content={<SeriesTooltip />} />
                           {cameraUsageTimelineKeys.map((key, index) => (
                             <Line
                               key={key}
@@ -1652,7 +1960,7 @@ function App() {
                             tick={{ fontSize: 11 }}
                           />
                           <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <Tooltip contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          <Tooltip content={<SeriesTooltip />} />
                           {lensUsageTimelineKeys.map((key, index) => (
                             <Line
                               key={key}
@@ -1736,33 +2044,69 @@ function App() {
               </section>
               )}
 
+              {dashboardPreferences.showTimelineChart &&
+                stats.top_capture_dates.length > 0 && (
+              <section className="chart-section compact-module timeline-module">
+                <div className="section-heading">
+                  <h2>Top 5 Capture Dates</h2>
+                  <span>{stats.top_capture_dates.length} dates</span>
+                </div>
+                <div className="chart-frame compact-chart">
+                      <ResponsiveContainer width="100%" height={160}>
+                        <BarChart
+                          data={stats.top_capture_dates}
+                          margin={{ top: 4, right: 6, bottom: 14, left: 0 }}
+                    >
+                      <CartesianGrid stroke="#273244" vertical={false} />
+                      <XAxis
+                        dataKey="label"
+                        stroke="#c6d3e6"
+                        tickLine={false}
+                        axisLine={false}
+                          height={28}
+                        tick={{ fontSize: 11 }}
+                      />
+                      <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                      <Tooltip cursor={{ fill: "rgba(74, 222, 128, 0.14)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                      <Bar dataKey="count" fill="#4ade80" radius={[6, 6, 0, 0]} activeBar={{ fill: "#bbf7d0" }} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
+              )}
+
               {dashboardPreferences.showFileTypeChart && (
               <section className="chart-section compact-module file-type-module">
                 <div className="section-heading">
-                  <h2>Average File Size by Type</h2>
-                  <span>{fileTypeRows.length} types</span>
+                  <h2>File Type Distribution</h2>
+                  <span>{fileTypeDistributionData.length} types</span>
                 </div>
 
-                {fileTypeChartData.length > 0 ? (
-                  <div className="chart-frame compact-chart">
-                    <ResponsiveContainer width="100%" height={240}>
-                      <BarChart
-                        data={fileTypeChartData}
-                        margin={{ top: 8, right: 6, bottom: 24, left: 0 }}
-                      >
-                        <CartesianGrid stroke="#273244" vertical={false} />
-                        <XAxis
-                          dataKey="extension"
-                          stroke="#c6d3e6"
-                          tickLine={false}
-                          axisLine={false}
-                          height={38}
-                          tick={{ fontSize: 11 }}
-                        />
-                        <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                        <Tooltip cursor={{ fill: "rgba(251, 191, 36, 0.16)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                        <Bar dataKey="average_file_size_mb" fill="#fbbf24" radius={[6, 6, 0, 0]} activeBar={{ fill: "#fde68a" }} />
-                      </BarChart>
+                {fileTypeDistributionData.length > 0 ? (
+                  <div className="chart-frame compact-chart donut-chart">
+                    <ResponsiveContainer width="100%" height={190}>
+                      <PieChart>
+                        <Pie
+                          data={fileTypeDistributionData}
+                          dataKey="count"
+                          nameKey="extension"
+                          innerRadius={42}
+                          outerRadius={72}
+                          paddingAngle={2}
+                        >
+                          {fileTypeDistributionData.map((row, index) => (
+                            <Cell
+                              key={row.extension}
+                              fill={
+                                CHART_SERIES_COLORS[
+                                  index % CHART_SERIES_COLORS.length
+                                ]
+                              }
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<SeriesTooltip />} />
+                      </PieChart>
                     </ResponsiveContainer>
                   </div>
                 ) : (
@@ -1823,6 +2167,22 @@ function App() {
             <span className="tool-card-copy">
               <strong>Metadata Search</strong>
               <span>Filter indexed photos by EXIF details.</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`tool-card analytics-card${activeTool === "analytics" ? " active" : ""}`}
+            onClick={() => toggleTool("analytics")}
+            aria-controls="analytics-explorer-panel"
+            aria-expanded={activeTool === "analytics"}
+          >
+            <span className="tool-card-icon analytics-icon" aria-hidden="true">
+              <SearchIcon />
+            </span>
+            <span className="tool-card-copy">
+              <strong>Analytics Explorer</strong>
+              <span>Build compact custom charts from scanned metadata.</span>
             </span>
           </button>
         </div>
@@ -2135,7 +2495,7 @@ function App() {
               placeholder="EOS R5"
             />
             <datalist id="camera-options">
-              {photoSearchOptions?.cameras.map((camera) => (
+              {(photoSearchOptions?.camera_models ?? photoSearchOptions?.cameras ?? []).map((camera) => (
                 <option key={camera} value={camera} />
               ))}
             </datalist>
@@ -2152,7 +2512,7 @@ function App() {
               placeholder="RF50"
             />
             <datalist id="lens-options">
-              {photoSearchOptions?.lenses.map((lens) => (
+              {(photoSearchOptions?.lens_models ?? photoSearchOptions?.lenses ?? []).map((lens) => (
                 <option key={lens} value={lens} />
               ))}
             </datalist>
@@ -2283,6 +2643,33 @@ function App() {
               }
             />
           </label>
+          <label>
+            Sort
+            <select
+              value={photoSearchFilters.sort_by}
+              onChange={(event) =>
+                updatePhotoSearchFilter("sort_by", event.target.value)
+              }
+            >
+              {SEARCH_SORT_FIELDS.map((field) => (
+                <option key={field} value={field}>
+                  {formatOptionLabel(field)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Order
+            <select
+              value={photoSearchFilters.sort_order}
+              onChange={(event) =>
+                updatePhotoSearchFilter("sort_order", event.target.value)
+              }
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+          </label>
           <button type="submit" disabled={isSearchingPhotos}>
             {isSearchingPhotos ? "Searching..." : "Search"}
           </button>
@@ -2295,51 +2682,327 @@ function App() {
         {photoSearch && (
           <div className="search-results">
             <div className="search-results-summary">
+              <button
+                type="button"
+                className="small-action-button"
+                onClick={() => setIsSearchResultsOpen((currentValue) => !currentValue)}
+                aria-expanded={isSearchResultsOpen}
+              >
+                {isSearchResultsOpen ? "Hide Results" : "Show Results"}
+              </button>
               <strong>{photoSearch.total_count.toLocaleString()} matches</strong>
-              <span>Showing {photoSearch.results.length.toLocaleString()}</span>
+              <span>
+                Showing {photoSearch.results.length.toLocaleString()} sorted by{" "}
+                {formatOptionLabel(photoSearch.sort_by)} {photoSearch.sort_order}
+              </span>
             </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>File</th>
-                  <th>Camera</th>
-                  <th>Lens</th>
-                  <th>Focal</th>
-                  <th>Date Taken</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {photoSearch.results.length > 0 ? (
-                  photoSearch.results.map((photo) => (
-                    <tr key={photo.id}>
-                      <td>{photo.filename}</td>
-                      <td>{formatOptional(photo.camera_model)}</td>
-                      <td>{formatOptional(photo.lens_model)}</td>
-                      <td>{formatFocalLength(photo.focal_length)}</td>
-                      <td>{formatDate(photo.date_taken)}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="small-action-button"
-                          onClick={() => void copyPhotoPath(photo)}
-                        >
-                          {copiedPhotoId === photo.id ? "Copied" : "Copy Path"}
-                        </button>
-                      </td>
+            {isSearchResultsOpen && (
+              <>
+                <div className="column-picker" aria-label="Search result columns">
+                  {DEFAULT_SEARCH_COLUMNS.map((column) => (
+                    <label key={column}>
+                      <input
+                        type="checkbox"
+                        checked={visibleSearchColumns.includes(column)}
+                        onChange={() => toggleSearchColumn(column)}
+                      />
+                      {SEARCH_COLUMN_LABELS[column]}
+                    </label>
+                  ))}
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      {visibleSearchColumns.map((column) => (
+                        <th key={column}>{SEARCH_COLUMN_LABELS[column]}</th>
+                      ))}
+                      <th>Action</th>
                     </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={6}>
-                      No matching photos. Try clearing a filter or widening the date
-                      or focal length range.
-                    </td>
-                  </tr>
+                  </thead>
+                  <tbody>
+                    {photoSearch.results.length > 0 ? (
+                      photoSearch.results.map((photo) => (
+                        <tr key={photo.id}>
+                          {visibleSearchColumns.map((column) => (
+                            <td key={column}>{formatSearchCell(photo, column)}</td>
+                          ))}
+                          <td>
+                            <button
+                              type="button"
+                              className="small-action-button"
+                              onClick={() => void copyPhotoPath(photo)}
+                            >
+                              {copiedPhotoId === photo.id ? "Copied" : "Copy Path"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={visibleSearchColumns.length + 1}>
+                          No matching photos. Try clearing a filter or widening the
+                          date or focal length range.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+                {photoSearch.results.length < photoSearch.total_count && (
+                  <div className="load-more-row">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() =>
+                        void runPhotoSearch(photoSearch.results.length, true)
+                      }
+                      disabled={isSearchingPhotos}
+                    >
+                      {isSearchingPhotos ? "Loading..." : "Load More"}
+                    </button>
+                  </div>
                 )}
-              </tbody>
-            </table>
+              </>
+            )}
           </div>
+        )}
+      </section>
+      )}
+
+      {activeTool === "analytics" && (
+      <section
+        id="analytics-explorer-panel"
+        className="search-section tool-detail analytics-section"
+        aria-labelledby="analytics-explorer-heading"
+      >
+        <div className="section-heading scan-heading">
+          <div>
+            <h2 id="analytics-explorer-heading">Analytics Explorer</h2>
+            <span>Build compact charts from indexed metadata</span>
+          </div>
+        </div>
+
+        <div className="preset-row">
+          {[
+            ["capture_month", "photo_count", "camera_model", "Camera usage over time"],
+            ["capture_month", "photo_count", "lens_model", "Lens usage over time"],
+            ["extension", "avg_file_size", "", "Average file size by type"],
+            ["camera_model", "total_file_size", "", "Total storage by camera"],
+            ["capture_date", "photo_count", "", "Top capture dates"],
+            ["iso", "photo_count", "", "ISO distribution"],
+            ["aperture", "photo_count", "", "Aperture distribution"],
+          ].map(([xAxis, metric, groupBy, label]) => (
+            <button
+              type="button"
+              className="small-action-button"
+              key={label}
+              onClick={() =>
+                setAnalyticsFilters({
+                  x_axis: xAxis,
+                  metric,
+                  group_by: groupBy,
+                  date_from: "",
+                  date_to: "",
+                })
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <form
+          className="search-form analytics-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runAnalytics();
+          }}
+        >
+          <label>
+            Compare by
+            <select
+              value={analyticsFilters.x_axis}
+              onChange={(event) =>
+                updateAnalyticsFilter("x_axis", event.target.value)
+              }
+            >
+              {ANALYTICS_DIMENSIONS.map((dimension) => (
+                <option key={dimension} value={dimension}>
+                  {formatOptionLabel(dimension)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Measure
+            <select
+              value={analyticsFilters.metric}
+              onChange={(event) =>
+                updateAnalyticsFilter("metric", event.target.value)
+              }
+            >
+              {ANALYTICS_METRICS.map((metric) => (
+                <option key={metric} value={metric}>
+                  {formatOptionLabel(metric)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Group by
+            <select
+              value={analyticsFilters.group_by}
+              onChange={(event) =>
+                updateAnalyticsFilter("group_by", event.target.value)
+              }
+            >
+              <option value="">None</option>
+              {ANALYTICS_GROUP_BY.filter(
+                (groupBy) => groupBy !== analyticsFilters.x_axis,
+              ).map((groupBy) => (
+                <option key={groupBy} value={groupBy}>
+                  {formatOptionLabel(groupBy)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            From
+            <input
+              type="date"
+              value={analyticsFilters.date_from}
+              onChange={(event) =>
+                updateAnalyticsFilter("date_from", event.target.value)
+              }
+            />
+          </label>
+          <label>
+            To
+            <input
+              type="date"
+              value={analyticsFilters.date_to}
+              onChange={(event) =>
+                updateAnalyticsFilter("date_to", event.target.value)
+              }
+            />
+          </label>
+          <button type="submit" disabled={isLoadingAnalytics}>
+            {isLoadingAnalytics ? "Building..." : "Build Chart"}
+          </button>
+        </form>
+
+        {analyticsError && (
+          <p className="scan-feedback failure">{analyticsError}</p>
+        )}
+
+        {analyticsResult && (
+          <section className="chart-section analytics-chart">
+            <div className="section-heading">
+              <h2>
+                {formatOptionLabel(analyticsResult.metric)} by{" "}
+                {formatOptionLabel(analyticsResult.x_axis)}
+              </h2>
+              <span>{analyticsResult.rows.length} points</span>
+            </div>
+            <div
+              className={`chart-frame${
+                analyticsResult.x_axis === "capture_date" ? " chart-scroll" : ""
+              }`}
+            >
+              <div
+                className="chart-scroll-inner"
+                style={{
+                  minWidth:
+                    analyticsResult.x_axis === "capture_date"
+                      ? `${Math.max(760, analyticsResult.rows.length * 44)}px`
+                      : "100%",
+                }}
+              >
+              <ResponsiveContainer width="100%" height={300}>
+                {analyticsResult.group_by ||
+                analyticsResult.x_axis.startsWith("capture_") ? (
+                  <LineChart
+                    data={analyticsResult.rows}
+                    margin={{ top: 12, right: 14, bottom: 28, left: 0 }}
+                  >
+                    <CartesianGrid stroke="#273244" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke="#c6d3e6"
+                      tickLine={false}
+                      axisLine={false}
+                      height={42}
+                      tick={{ fontSize: 11 }}
+                    />
+                    <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                    <Tooltip content={<SeriesTooltip />} />
+                    {(analyticsResult.group_by
+                      ? analyticsResult.series
+                      : ["value"]
+                    ).map((key, index) => (
+                      <Line
+                        key={key}
+                        type="monotone"
+                        dataKey={key}
+                        stroke={
+                          CHART_SERIES_COLORS[index % CHART_SERIES_COLORS.length]
+                        }
+                        strokeWidth={2.5}
+                        dot={{ r: 2 }}
+                        activeDot={{ r: 5 }}
+                      />
+                    ))}
+                  </LineChart>
+                ) : (
+                  <BarChart
+                    data={analyticsResult.rows}
+                    margin={{ top: 8, right: 8, bottom: 36, left: 0 }}
+                  >
+                    <CartesianGrid stroke="#273244" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke="#c6d3e6"
+                      tickLine={false}
+                      axisLine={false}
+                      height={38}
+                      tick={{ fontSize: 11 }}
+                    />
+                    <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                    <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.16)" }} content={<SeriesTooltip />} />
+                    <Bar dataKey="value" fill="#7dd3fc" radius={[6, 6, 0, 0]} activeBar={{ fill: "#bfffea" }} />
+                  </BarChart>
+                )}
+              </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="analytics-result-list">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{formatOptionLabel(analyticsResult.x_axis)}</th>
+                    {(analyticsResult.group_by
+                      ? analyticsResult.series
+                      : ["value"]
+                    ).map((key) => (
+                      <th key={key}>{formatOptionLabel(key)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {analyticsResult.rows.map((row) => (
+                    <tr key={String(row.label)}>
+                      <td>{row.label}</td>
+                      {(analyticsResult.group_by
+                        ? analyticsResult.series
+                        : ["value"]
+                      ).map((key) => (
+                        <td key={key}>{row[key] ?? "—"}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         )}
       </section>
       )}

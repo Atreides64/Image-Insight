@@ -219,6 +219,8 @@ and can be combined:
 - `date_to`
 - `extension`
 - `device_type`
+- `sort_by`
+- `sort_order`
 - `limit`
 - `offset`
 
@@ -228,14 +230,25 @@ Example:
 curl "http://127.0.0.1:8000/photos/search?camera_model=EOS&min_focal_length=24&max_focal_length=85"
 ```
 
-The response includes `total_count`, `limit`, `offset`, and `results` for
-simple pagination. Search defaults to `limit=50` and `offset=0`; requested
-limits above 500 are capped at 500, and negative pagination values return a
-clean `400` response.
+The response includes `total_count`, `limit`, `offset`, `sort_by`,
+`sort_order`, and `results` for simple pagination. Search defaults to
+`limit=50`, `offset=0`, `sort_by=date_taken`, and `sort_order=desc`;
+requested limits above 500 are capped at 500, and invalid pagination or sort
+values return clean `400` responses. Results include file size, extension,
+capture date, camera/lens, exposure fields, focal length, and derived
+`device_type`.
 
 Metadata search options are available from `GET /photos/search-options`, which
 returns capped distinct camera, lens, extension, ISO, aperture, shutter speed,
 and device-type values for dropdowns/autocomplete.
+
+Custom analytics are available from `GET /analytics`. Supported dimensions
+include capture month/date, camera, lens, extension, device type, ISO, aperture,
+shutter speed bucket, and focal length bucket. Supported metrics are
+`photo_count`, `avg_file_size`, and `total_file_size`, with optional series
+grouping by camera, lens, extension, or device type. Capture-date-heavy
+analytics can use safe `limit`, `offset`, `date_from`, and `date_to` parameters
+for larger libraries.
 
 Then open:
 
@@ -276,15 +289,20 @@ To point it somewhere else, create `frontend/.env.local`:
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-The dashboard is organized around a branded header, top-level Scan Library and
-Metadata Search tool cards, and a colorful Insights section. Insight modules use
-a compact responsive grid on desktop, with varied card gradients for charts,
-file-type summaries, and stat cards. Default charts include compact camera/lens
-usage timelines when dated metadata exists and average file size by type. Scan Library combines new scans, metadata
+The dashboard is organized around a branded header, top-level Scan Library,
+Metadata Search, and Analytics Explorer tool cards, plus a colorful Insights
+section. Insight modules use a compact responsive grid on desktop, with varied
+card gradients for charts, file-type summaries, and stat cards. Default charts
+include compact camera/lens usage timelines when dated metadata exists, a donut
+file type distribution, and top capture dates. Scan Library combines new scans, metadata
 refreshes, cancellation, resume/rerun actions, collapsible scan history, and one
 concise info popover for scan terminology. Metadata Search stays as a separate
-tool. If a folder has already been scanned, the dashboard asks the user to choose
-Refresh metadata, Scan anyway, or Cancel before starting another scan.
+tool with sortable/paginated results and configurable visible columns. Analytics
+Explorer uses friendly Compare by, Measure, and Group by controls, quick-build
+presets, scrollable dense date charts, and broader chart series colors for
+camera/lens comparisons. If a folder has
+already been scanned, the dashboard asks the user to choose Refresh metadata,
+Scan anyway, or Cancel before starting another scan.
 
 The local "Customize Dashboard" panel lives under Settings. Users can toggle
 individual cards, charts, and search/history sections, and those preferences are
@@ -296,7 +314,7 @@ metadata are excluded instead of falling back to modified or directory dates.
 
 ## Status
 
-v1.2 visual polish focuses on a more colorful, compact, insight-forward
-dashboard while preserving the existing scan, search, and customization
+v1.3.0 focuses on stronger Metadata Search, sortable/paginated result tables,
+custom analytics charts, and more useful default analytics while preserving scan
 behavior. Duplicates, maps, open-in-folder, previews, and external job services
 remain future work.
