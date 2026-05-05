@@ -9,6 +9,7 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - Backend: Python, FastAPI, SQLAlchemy
 - Database: SQLite, created locally at the repo root as `image_insight.db`
 - Frontend: React, TypeScript, Vite, Recharts
+- Desktop shell: Tauri 2 scaffold under `frontend/src-tauri`
 - Tooling: `pip` for backend dependencies, `pytest` for backend tests, `npm` for frontend dependencies
 - CI: GitHub Actions runs backend tests and frontend build on pushes and pull requests
 
@@ -52,6 +53,7 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - Long scans commit visible progress every 500 files seen or 500 matched image files so polling does not appear stuck in folders with many non-image files.
 - Starting a duplicate running scan for the same folder returns a conflict unless `resume=true` is attaching to the existing running session.
 - The frontend fetches the backend from `VITE_API_BASE_URL`, defaulting to `http://127.0.0.1:8000`.
+- The first Tauri desktop shell lives in `frontend/src-tauri`; it loads the existing Vite dev server in development and `frontend/dist` assets in packaged builds, but does not bundle or launch the FastAPI backend yet.
 - `/analytics` returns chart-friendly custom analytics for supported dimensions, metrics, optional series groupings, safe `limit`/`offset`, and optional capture date ranges with clean validation errors for invalid combinations.
 - `/stats` includes default insight fields for average file size, storage by file type, average file size by file type, RAW/JPEG split, phone/camera/unknown counts, most common ISO/aperture/shutter speed, average file size by camera, top capture dates, ISO/aperture distributions, shutter/focal buckets, camera/lens/focal usage timelines, capture-date coverage, and a monthly date-taken `photo_timeline` with top camera/lens labels for tooltips. `photo_timeline` requires `date_taken` plus at least one credible capture metadata field.
 - Camera type classification is derived from make/model text only (`phone`, `camera`, `unknown`) and does not overwrite stored EXIF camera fields.
@@ -87,6 +89,13 @@ Frontend:
 cd frontend
 npm install
 npm run dev
+```
+
+Desktop shell:
+
+```bash
+cd frontend
+npm run desktop:dev
 ```
 
 Useful URLs:
