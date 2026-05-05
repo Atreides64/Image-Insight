@@ -17,6 +17,16 @@ A local-first media metadata analytics platform for analyzing and organizing exi
 - React + TypeScript
 - Recharts
 
+## Quick Start
+
+1. Start the FastAPI backend.
+2. Start the Vite dashboard.
+3. Scan a local photo folder from the dashboard.
+4. Watch scan progress, then use stats, charts, history, and metadata search.
+
+The dashboard expects the backend at `http://127.0.0.1:8000` unless
+`VITE_API_BASE_URL` is set.
+
 ## Backend Setup
 
 Create and activate a Python virtual environment:
