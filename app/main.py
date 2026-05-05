@@ -11,7 +11,7 @@ from threading import Lock, Thread
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import ExifTags, Image, UnidentifiedImageError
-from sqlalchemy import func, text
+from sqlalchemy import and_, func, not_, or_, text
 
 from app.database import Base, DATABASE_URL, DEFAULT_DATABASE_PATH, SessionLocal, engine
 from app.models import Photo, ScanSession, ScanSessionFile
@@ -597,6 +597,17 @@ def format_count_rows(rows: list[tuple[object, int]]) -> list[dict[str, object]]
     ]
 
 
+def format_size_rows(rows: list[tuple[object, int]]) -> list[dict[str, object]]:
+    return [
+        {
+            "label": str(label),
+            "size_bytes": size_bytes,
+        }
+        for label, size_bytes in rows
+        if label
+    ]
+
+
 def format_focal_length(value: float | None) -> str | None:
     if value is None:
         return None
@@ -605,6 +616,121 @@ def format_focal_length(value: float | None) -> str | None:
         return f"{int(value)}mm"
 
     return f"{value:g}mm"
+
+
+def format_aperture(value: float | None) -> str | None:
+    if value is None:
+        return None
+
+    return f"f/{value:g}"
+
+
+def build_usage_timeline(
+    rows: list[tuple[str, str, int]],
+    top_labels: list[str],
+) -> list[dict[str, object]]:
+    selected_labels = top_labels[:3]
+    if not selected_labels:
+        return []
+
+    buckets: dict[str, Counter] = {}
+    for month, label, count in rows:
+        if label not in selected_labels:
+            continue
+
+        buckets.setdefault(month, Counter())[label] += count
+
+    return [
+        {
+            "label": month,
+            **{label: buckets[month].get(label, 0) for label in selected_labels},
+        }
+        for month in sorted(buckets)
+    ]
+
+
+def classify_camera_type(camera_make: str | None, camera_model: str | None) -> str:
+    label = " ".join(part for part in (camera_make, camera_model) if part).lower()
+
+    if not label:
+        return "unknown"
+
+    phone_terms = (
+        "iphone",
+        "apple",
+        "pixel",
+        "samsung",
+        "sm-",
+        "google",
+        "lg",
+        "nexus",
+    )
+    camera_terms = (
+        "nikon",
+        "canon",
+        "fujifilm",
+        "sony",
+        "ricoh",
+        "olympus",
+        "panasonic",
+        "leica",
+    )
+
+    if any(term in label for term in phone_terms):
+        return "phone"
+
+    if any(term in label for term in camera_terms):
+        return "camera"
+
+    return "unknown"
+
+
+def camera_type_expression(device_type: str):
+    phone_expression = or_(
+        Photo.camera_make.ilike("%iPhone%"),
+        Photo.camera_model.ilike("%iPhone%"),
+        Photo.camera_make.ilike("%Apple%"),
+        Photo.camera_model.ilike("%Apple%"),
+        Photo.camera_make.ilike("%Pixel%"),
+        Photo.camera_model.ilike("%Pixel%"),
+        Photo.camera_make.ilike("%Samsung%"),
+        Photo.camera_model.ilike("%Samsung%"),
+        Photo.camera_make.ilike("%SM-%"),
+        Photo.camera_model.ilike("%SM-%"),
+        Photo.camera_make.ilike("%Google%"),
+        Photo.camera_model.ilike("%Google%"),
+        Photo.camera_make.ilike("%LG%"),
+        Photo.camera_model.ilike("%LG%"),
+        Photo.camera_make.ilike("%Nexus%"),
+        Photo.camera_model.ilike("%Nexus%"),
+    )
+    camera_expression = or_(
+        Photo.camera_make.ilike("%Nikon%"),
+        Photo.camera_model.ilike("%Nikon%"),
+        Photo.camera_make.ilike("%Canon%"),
+        Photo.camera_model.ilike("%Canon%"),
+        Photo.camera_make.ilike("%Fujifilm%"),
+        Photo.camera_model.ilike("%Fujifilm%"),
+        Photo.camera_make.ilike("%Sony%"),
+        Photo.camera_model.ilike("%Sony%"),
+        Photo.camera_make.ilike("%Ricoh%"),
+        Photo.camera_model.ilike("%Ricoh%"),
+        Photo.camera_make.ilike("%Olympus%"),
+        Photo.camera_model.ilike("%Olympus%"),
+        Photo.camera_make.ilike("%Panasonic%"),
+        Photo.camera_model.ilike("%Panasonic%"),
+        Photo.camera_make.ilike("%Leica%"),
+        Photo.camera_model.ilike("%Leica%"),
+    )
+
+    if device_type == "phone":
+        return phone_expression
+    if device_type == "camera":
+        return camera_expression
+    if device_type == "unknown":
+        return and_(not_(phone_expression), not_(camera_expression))
+
+    return None
 
 
 def normalize_datetime(value: datetime) -> datetime:
@@ -1379,9 +1505,13 @@ def search_photos(
     lens_model: str | None = None,
     min_focal_length: float | None = None,
     max_focal_length: float | None = None,
+    iso: int | None = None,
+    aperture: float | None = None,
+    shutter_speed: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
     extension: str | None = None,
+    device_type: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, object]:
@@ -1398,6 +1528,8 @@ def search_photos(
     normalized_camera_model = camera_model.strip() if camera_model else None
     normalized_lens_model = lens_model.strip() if lens_model else None
     normalized_extension = extension.strip().lower().lstrip(".") if extension else None
+    normalized_shutter_speed = shutter_speed.strip() if shutter_speed else None
+    normalized_device_type = device_type.strip().lower() if device_type else None
 
     if parsed_date_from and parsed_date_to and parsed_date_from > parsed_date_to:
         raise HTTPException(status_code=400, detail="date_from must be before date_to")
@@ -1412,11 +1544,29 @@ def search_photos(
             detail="min_focal_length must be less than or equal to max_focal_length",
         )
 
+    if normalized_device_type and normalized_device_type not in {
+        "phone",
+        "camera",
+        "unknown",
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="device_type must be phone, camera, or unknown",
+        )
+
     with SessionLocal() as session:
         query = session.query(Photo)
 
         if normalized_camera_model:
-            query = query.filter(Photo.camera_model.ilike(f"%{normalized_camera_model}%"))
+            query = query.filter(
+                or_(
+                    Photo.camera_make.ilike(f"%{normalized_camera_model}%"),
+                    Photo.camera_model.ilike(f"%{normalized_camera_model}%"),
+                    (
+                        Photo.camera_make + " " + Photo.camera_model
+                    ).ilike(f"%{normalized_camera_model}%"),
+                )
+            )
 
         if normalized_lens_model:
             query = query.filter(Photo.lens_model.ilike(f"%{normalized_lens_model}%"))
@@ -1427,6 +1577,15 @@ def search_photos(
         if max_focal_length is not None:
             query = query.filter(Photo.focal_length <= max_focal_length)
 
+        if iso is not None:
+            query = query.filter(Photo.iso == iso)
+
+        if aperture is not None:
+            query = query.filter(Photo.aperture == aperture)
+
+        if normalized_shutter_speed:
+            query = query.filter(Photo.shutter_speed == normalized_shutter_speed)
+
         if parsed_date_from:
             query = query.filter(Photo.date_taken >= parsed_date_from)
 
@@ -1435,6 +1594,11 @@ def search_photos(
 
         if normalized_extension:
             query = query.filter(Photo.extension == normalized_extension)
+
+        if normalized_device_type:
+            expression = camera_type_expression(normalized_device_type)
+            if expression is not None:
+                query = query.filter(expression)
 
         total_count = query.count()
         photos = (
@@ -1449,6 +1613,81 @@ def search_photos(
         "limit": limit,
         "offset": offset,
         "results": [format_photo(photo) for photo in photos],
+    }
+
+
+@app.get("/photos/search-options")
+def photo_search_options(limit: int = 100) -> dict[str, object]:
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="limit must be 1 or greater")
+
+    limit = min(limit, 250)
+
+    with SessionLocal() as session:
+        camera_rows = (
+            session.query(Photo.camera_make, Photo.camera_model)
+            .filter((Photo.camera_make.is_not(None)) | (Photo.camera_model.is_not(None)))
+            .group_by(Photo.camera_make, Photo.camera_model)
+            .order_by(Photo.camera_make, Photo.camera_model)
+            .limit(limit)
+            .all()
+        )
+        lens_rows = (
+            session.query(Photo.lens_model)
+            .filter(Photo.lens_model.is_not(None))
+            .group_by(Photo.lens_model)
+            .order_by(Photo.lens_model)
+            .limit(limit)
+            .all()
+        )
+        extension_rows = (
+            session.query(Photo.extension)
+            .filter(Photo.extension.is_not(None))
+            .group_by(Photo.extension)
+            .order_by(Photo.extension)
+            .limit(limit)
+            .all()
+        )
+        iso_rows = (
+            session.query(Photo.iso)
+            .filter(Photo.iso.is_not(None))
+            .group_by(Photo.iso)
+            .order_by(Photo.iso)
+            .limit(limit)
+            .all()
+        )
+        aperture_rows = (
+            session.query(Photo.aperture)
+            .filter(Photo.aperture.is_not(None))
+            .group_by(Photo.aperture)
+            .order_by(Photo.aperture)
+            .limit(limit)
+            .all()
+        )
+        shutter_speed_rows = (
+            session.query(Photo.shutter_speed)
+            .filter(Photo.shutter_speed.is_not(None))
+            .group_by(Photo.shutter_speed)
+            .order_by(Photo.shutter_speed)
+            .limit(limit)
+            .all()
+        )
+
+    cameras = [
+        " ".join(part for part in (make, model) if part)
+        for make, model in camera_rows
+        if " ".join(part for part in (make, model) if part)
+    ]
+
+    return {
+        "limit": limit,
+        "cameras": cameras,
+        "lenses": [row[0] for row in lens_rows],
+        "extensions": [row[0] for row in extension_rows],
+        "iso_values": [row[0] for row in iso_rows],
+        "aperture_values": [row[0] for row in aperture_rows],
+        "shutter_speed_values": [row[0] for row in shutter_speed_rows],
+        "device_types": ["phone", "camera", "unknown"],
     }
 
 
@@ -1476,6 +1715,71 @@ def get_stats() -> dict[str, object]:
             .order_by(Photo.extension)
             .all()
         )
+        storage_by_file_type_rows = (
+            session.query(Photo.extension, func.sum(Photo.size_bytes))
+            .group_by(Photo.extension)
+            .order_by(func.sum(Photo.size_bytes).desc(), Photo.extension)
+            .all()
+        )
+        average_file_size_by_type_rows = (
+            session.query(Photo.extension, func.avg(Photo.size_bytes), func.count(Photo.id))
+            .group_by(Photo.extension)
+            .order_by(func.avg(Photo.size_bytes).desc(), Photo.extension)
+            .all()
+        )
+        raw_extension_count = (
+            session.query(func.count(Photo.id))
+            .filter(Photo.extension.in_(("dng", "raf")))
+            .scalar()
+            or 0
+        )
+        jpeg_extension_count = (
+            session.query(func.count(Photo.id))
+            .filter(Photo.extension.in_(("jpg", "jpeg")))
+            .scalar()
+            or 0
+        )
+        capture_date_count = (
+            session.query(func.count(Photo.id))
+            .filter(Photo.date_taken.is_not(None))
+            .scalar()
+            or 0
+        )
+        most_common_iso_row = (
+            session.query(Photo.iso, func.count(Photo.id))
+            .filter(Photo.iso.is_not(None))
+            .group_by(Photo.iso)
+            .order_by(func.count(Photo.id).desc(), Photo.iso)
+            .first()
+        )
+        most_common_aperture_row = (
+            session.query(Photo.aperture, func.count(Photo.id))
+            .filter(Photo.aperture.is_not(None))
+            .group_by(Photo.aperture)
+            .order_by(func.count(Photo.id).desc(), Photo.aperture)
+            .first()
+        )
+        most_common_shutter_speed_row = (
+            session.query(Photo.shutter_speed, func.count(Photo.id))
+            .filter(Photo.shutter_speed.is_not(None))
+            .group_by(Photo.shutter_speed)
+            .order_by(func.count(Photo.id).desc(), Photo.shutter_speed)
+            .first()
+        )
+        average_file_size_by_camera_rows = (
+            session.query(
+                Photo.camera_make,
+                Photo.camera_model,
+                func.avg(Photo.size_bytes),
+                func.count(Photo.id),
+            )
+            .filter((Photo.camera_make.is_not(None)) | (Photo.camera_model.is_not(None)))
+            .group_by(Photo.camera_make, Photo.camera_model)
+            .order_by(func.avg(Photo.size_bytes).desc())
+            .limit(10)
+            .all()
+        )
+        device_camera_rows = session.query(Photo.camera_make, Photo.camera_model).all()
         camera_photos = (
             session.query(Photo.camera_make, Photo.camera_model)
             .filter((Photo.camera_make.is_not(None)) | (Photo.camera_model.is_not(None)))
@@ -1487,6 +1791,31 @@ def get_stats() -> dict[str, object]:
             .group_by(Photo.lens_model)
             .order_by(func.count(Photo.id).desc(), Photo.lens_model)
             .limit(10)
+            .all()
+        )
+        camera_usage_timeline_rows = (
+            session.query(
+                func.strftime("%Y-%m", Photo.date_taken).label("month"),
+                Photo.camera_make,
+                Photo.camera_model,
+                func.count(Photo.id),
+            )
+            .filter(Photo.date_taken.is_not(None))
+            .filter((Photo.camera_make.is_not(None)) | (Photo.camera_model.is_not(None)))
+            .group_by("month", Photo.camera_make, Photo.camera_model)
+            .order_by("month")
+            .all()
+        )
+        lens_usage_timeline_rows = (
+            session.query(
+                func.strftime("%Y-%m", Photo.date_taken).label("month"),
+                Photo.lens_model,
+                func.count(Photo.id),
+            )
+            .filter(Photo.date_taken.is_not(None))
+            .filter(Photo.lens_model.is_not(None))
+            .group_by("month", Photo.lens_model)
+            .order_by("month")
             .all()
         )
         focal_length_rows = (
@@ -1536,10 +1865,27 @@ def get_stats() -> dict[str, object]:
                 func.count(Photo.id),
             )
             .filter(Photo.date_taken.is_not(None))
+            .filter(
+                (Photo.camera_make.is_not(None))
+                | (Photo.camera_model.is_not(None))
+                | (Photo.iso.is_not(None))
+                | (Photo.aperture.is_not(None))
+                | (Photo.shutter_speed.is_not(None))
+                | (Photo.focal_length.is_not(None))
+            )
             .group_by("month", Photo.camera_make, Photo.camera_model, Photo.lens_model)
             .order_by("month")
             .all()
         )
+
+    raw_vs_jpeg_counts = {
+        "raw": raw_extension_count,
+        "jpeg": jpeg_extension_count,
+        "other": max(total_photos - raw_extension_count - jpeg_extension_count, 0),
+    }
+    phone_vs_camera_counts = {"phone": 0, "camera": 0, "unknown": 0}
+    for camera_make, camera_model in device_camera_rows:
+        phone_vs_camera_counts[classify_camera_type(camera_make, camera_model)] += 1
 
     camera_counts = Counter(
         " ".join(part for part in (make, model) if part)
@@ -1550,10 +1896,37 @@ def get_stats() -> dict[str, object]:
         for label, count in camera_counts.most_common(10)
         if label
     ]
+    camera_usage_rows = [
+        (
+            month,
+            " ".join(part for part in (make, model) if part),
+            count,
+        )
+        for month, make, model, count in camera_usage_timeline_rows
+        if " ".join(part for part in (make, model) if part)
+    ]
+    camera_usage_timeline = build_usage_timeline(
+        camera_usage_rows,
+        [str(row["label"]) for row in top_cameras],
+    )
+    top_lenses = format_count_rows(lens_rows)
+    lens_usage_timeline = build_usage_timeline(
+        lens_usage_timeline_rows,
+        [str(row["label"]) for row in top_lenses],
+    )
     top_focal_lengths = [
         {"label": format_focal_length(value), "count": count}
         for value, count in focal_length_rows
         if format_focal_length(value)
+    ]
+    average_file_size_by_camera = [
+        {
+            "label": " ".join(part for part in (make, model) if part),
+            "average_file_size_bytes": round(float(average_size), 2),
+            "count": count,
+        }
+        for make, model, average_size, count in average_file_size_by_camera_rows
+        if " ".join(part for part in (make, model) if part)
     ]
     timeline_buckets: dict[str, dict[str, object]] = {}
     for month, camera_make, camera_model, lens_model, count in timeline_detail_rows:
@@ -1603,12 +1976,53 @@ def get_stats() -> dict[str, object]:
     return {
         "total_photos": total_photos,
         "total_size_bytes": total_size_bytes,
+        "average_file_size_bytes": round(total_size_bytes / total_photos, 2)
+        if total_photos
+        else 0,
         "file_type_counts": {
             extension: count for extension, count in file_type_rows
         },
+        "storage_by_file_type": format_size_rows(storage_by_file_type_rows),
+        "average_file_size_by_file_type": [
+            {
+                "label": str(extension),
+                "average_file_size_bytes": round(float(average_size), 2),
+                "count": count,
+            }
+            for extension, average_size, count in average_file_size_by_type_rows
+            if extension
+        ],
+        "raw_vs_jpeg_counts": raw_vs_jpeg_counts,
+        "phone_vs_camera_counts": phone_vs_camera_counts,
         "top_cameras": top_cameras,
-        "top_lenses": format_count_rows(lens_rows),
+        "top_lenses": top_lenses,
+        "camera_usage_timeline": camera_usage_timeline,
+        "lens_usage_timeline": lens_usage_timeline,
         "top_focal_lengths": top_focal_lengths,
+        "most_common_iso": (
+            {"label": str(most_common_iso_row[0]), "count": most_common_iso_row[1]}
+            if most_common_iso_row
+            else None
+        ),
+        "most_common_aperture": (
+            {
+                "label": format_aperture(most_common_aperture_row[0]),
+                "count": most_common_aperture_row[1],
+            }
+            if most_common_aperture_row
+            else None
+        ),
+        "most_common_shutter_speed": (
+            {
+                "label": str(most_common_shutter_speed_row[0]),
+                "count": most_common_shutter_speed_row[1],
+            }
+            if most_common_shutter_speed_row
+            else None
+        ),
+        "average_file_size_by_camera": average_file_size_by_camera,
+        "photos_with_capture_date": capture_date_count,
+        "photos_missing_capture_date": total_photos - capture_date_count,
         "photos_by_year": format_count_rows(year_rows),
         "photos_by_month": format_count_rows(month_rows),
         "photo_timeline": photo_timeline,

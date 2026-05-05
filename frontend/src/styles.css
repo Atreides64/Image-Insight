@@ -596,7 +596,8 @@ h2 {
 }
 
 .scan-controls input,
-.search-form input {
+.search-form input,
+.search-form select {
   min-width: 0;
   border: 1px solid #314055;
   border-radius: 8px;
@@ -607,13 +608,15 @@ h2 {
 }
 
 .scan-controls input:focus,
-.search-form input:focus {
+.search-form input:focus,
+.search-form select:focus {
   border-color: #7dd3fc;
   box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.16);
 }
 
 .scan-controls input:disabled,
-.search-form input:disabled {
+.search-form input:disabled,
+.search-form select:disabled {
   color: #7f8da1;
 }
 
@@ -1015,6 +1018,33 @@ h2 {
 .stat-card:nth-child(4n) {
   background:
     linear-gradient(135deg, rgba(251, 191, 36, 0.16), rgba(249, 115, 22, 0.05)),
+    #101823;
+}
+
+.insight-default-card {
+  min-height: 88px;
+  padding: 13px;
+}
+
+.insight-default-card strong {
+  font-size: clamp(1rem, 1.8vw, 1.24rem);
+}
+
+.file-insight-card {
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(34, 211, 238, 0.06)),
+    #101823;
+}
+
+.camera-insight-card {
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(99, 102, 241, 0.06)),
+    #101823;
+}
+
+.exposure-insight-card {
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(249, 115, 22, 0.06)),
     #101823;
 }
 
