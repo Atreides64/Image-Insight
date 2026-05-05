@@ -109,6 +109,37 @@ def test_stats_returns_valid_json_structure() -> None:
     assert isinstance(data["photo_timeline"], list)
 
 
+def test_stats_timeline_excludes_photos_without_capture_dates(tmp_path: Path) -> None:
+    with SessionLocal() as session:
+        session.add(
+            Photo(
+                filename="no-capture-date.jpg",
+                path=str(tmp_path / "no-capture-date.jpg"),
+                extension="jpg",
+                size_bytes=100,
+                modified_at=datetime(2099, 5, 1, tzinfo=timezone.utc),
+                scanned_at=datetime(2099, 5, 1, tzinfo=timezone.utc),
+                camera_make="Future",
+                camera_model="Archive",
+                lens_model=None,
+                focal_length=None,
+                iso=None,
+                aperture=None,
+                shutter_speed=None,
+                date_taken=None,
+            )
+        )
+        session.commit()
+
+    response = client.get("/stats")
+    data = response.json()
+
+    assert response.status_code == 200
+    assert all(row["label"] != "2099-05" for row in data["photo_timeline"])
+    assert all(row["label"] != "2099-05" for row in data["photos_by_month"])
+    assert data["busiest_date"] is None or data["busiest_date"]["label"] != "2099-05-01"
+
+
 def test_scan_folder_starts_background_job_and_status_completes(tmp_path: Path) -> None:
     nested_folder = tmp_path / "nested"
     nested_folder.mkdir()

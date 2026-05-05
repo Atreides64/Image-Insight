@@ -1284,13 +1284,10 @@ function App() {
             </section>
           )}
 
-          {showAnyInsightChart && (
-            <>
-              {(dashboardPreferences.showCameraChart ||
-                dashboardPreferences.showLensChart) && (
-              <div className="chart-grid">
-                {dashboardPreferences.showCameraChart && (
-                <section className="chart-section">
+          {(showAnyInsightChart || dashboardPreferences.showFileTypeTable) && (
+            <div className="insight-module-grid">
+              {dashboardPreferences.showCameraChart && (
+                <section className="chart-section camera-module">
                   <div className="section-heading">
                     <h2>Camera Usage</h2>
                     <span>{cameraChartData.length} cameras</span>
@@ -1299,12 +1296,23 @@ function App() {
                   {cameraChartData.length > 0 ? (
                     <div className="chart-frame">
                       <ResponsiveContainer width="100%" height={280}>
-                        <BarChart data={cameraChartData}>
+                        <BarChart
+                          data={cameraChartData}
+                          margin={{ top: 8, right: 8, bottom: 36, left: 0 }}
+                        >
                           <CartesianGrid stroke="#273244" vertical={false} />
-                          <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#c6d3e6"
+                            tickLine={false}
+                            axisLine={false}
+                            height={54}
+                            interval={0}
+                            tick={{ fontSize: 11 }}
+                          />
                           <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.1)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                          <Bar dataKey="count" fill="#7dd3fc" radius={[6, 6, 0, 0]} />
+                          <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.16)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          <Bar dataKey="count" fill="#4ade80" radius={[6, 6, 0, 0]} activeBar={{ fill: "#bfffea" }} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -1312,10 +1320,10 @@ function App() {
                     <p className="empty-chart">Run a scan with EXIF data to populate camera usage.</p>
                   )}
                 </section>
-                )}
+              )}
 
-                {dashboardPreferences.showLensChart && (
-                <section className="chart-section">
+              {dashboardPreferences.showLensChart && (
+                <section className="chart-section lens-module">
                   <div className="section-heading">
                     <h2>Lens Usage</h2>
                     <span>{lensChartData.length} lenses</span>
@@ -1324,12 +1332,23 @@ function App() {
                   {lensChartData.length > 0 ? (
                     <div className="chart-frame">
                       <ResponsiveContainer width="100%" height={280}>
-                        <BarChart data={lensChartData}>
+                        <BarChart
+                          data={lensChartData}
+                          margin={{ top: 8, right: 8, bottom: 36, left: 0 }}
+                        >
                           <CartesianGrid stroke="#273244" vertical={false} />
-                          <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#c6d3e6"
+                            tickLine={false}
+                            axisLine={false}
+                            height={54}
+                            interval={0}
+                            tick={{ fontSize: 11 }}
+                          />
                           <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <Tooltip cursor={{ fill: "rgba(169, 135, 255, 0.1)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                          <Bar dataKey="count" fill="#8fb6ff" radius={[6, 6, 0, 0]} />
+                          <Tooltip cursor={{ fill: "rgba(169, 135, 255, 0.16)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          <Bar dataKey="count" fill="#a987ff" radius={[6, 6, 0, 0]} activeBar={{ fill: "#d7c7ff" }} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -1337,19 +1356,16 @@ function App() {
                     <p className="empty-chart">Run a scan with EXIF data to populate lens usage.</p>
                   )}
                 </section>
-                )}
-              </div>
               )}
 
               {dashboardPreferences.showTimelineChart &&
                 timelineChartData.length > 0 && (
-              <section className="chart-section">
+              <section className="chart-section timeline-module">
                 <div className="section-heading">
                   <div>
-                    <h2>Capture Timeline where available</h2>
+                    <h2>Capture Timeline</h2>
                     <span>
-                      Imported or exported archives may contain added/export dates
-                      instead of true capture dates.
+                      Only files with EXIF capture dates are included.
                     </span>
                   </div>
                   <span>{timelineChartData.length} months</span>
@@ -1357,12 +1373,22 @@ function App() {
 
                 <div className="chart-frame">
                   <ResponsiveContainer width="100%" height={280}>
-                    <LineChart data={timelineChartData}>
+                    <LineChart
+                      data={timelineChartData}
+                      margin={{ top: 12, right: 14, bottom: 28, left: 0 }}
+                    >
                       <CartesianGrid stroke="#273244" vertical={false} />
-                      <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                      <XAxis
+                        dataKey="label"
+                        stroke="#c6d3e6"
+                        tickLine={false}
+                        axisLine={false}
+                        height={42}
+                        tick={{ fontSize: 11 }}
+                      />
                       <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
                       <Tooltip content={<TimelineTooltip />} />
-                      <Line type="monotone" dataKey="count" stroke="#a987ff" strokeWidth={3} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="count" stroke="#f472b6" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 6, fill: "#fdf2f8" }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -1370,7 +1396,7 @@ function App() {
               )}
 
               {dashboardPreferences.showFileTypeChart && (
-              <section className="chart-section">
+              <section className="chart-section compact-module file-type-module">
                 <div className="section-heading">
                   <h2>File Type Distribution</h2>
                   <span>{fileTypeRows.length} types</span>
@@ -1379,12 +1405,22 @@ function App() {
                 {fileTypeChartData.length > 0 ? (
                   <div className="chart-frame compact-chart">
                     <ResponsiveContainer width="100%" height={240}>
-                      <BarChart data={fileTypeChartData}>
+                      <BarChart
+                        data={fileTypeChartData}
+                        margin={{ top: 8, right: 6, bottom: 24, left: 0 }}
+                      >
                         <CartesianGrid stroke="#273244" vertical={false} />
-                        <XAxis dataKey="extension" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                        <XAxis
+                          dataKey="extension"
+                          stroke="#c6d3e6"
+                          tickLine={false}
+                          axisLine={false}
+                          height={38}
+                          tick={{ fontSize: 11 }}
+                        />
                         <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                        <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.1)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                        <Bar dataKey="count" fill="#7dd3fc" radius={[6, 6, 0, 0]} />
+                        <Tooltip cursor={{ fill: "rgba(251, 191, 36, 0.16)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                        <Bar dataKey="count" fill="#fbbf24" radius={[6, 6, 0, 0]} activeBar={{ fill: "#fde68a" }} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -1393,11 +1429,9 @@ function App() {
                 )}
               </section>
               )}
-            </>
-          )}
 
-          {dashboardPreferences.showFileTypeTable && (
-          <section className="table-section">
+              {dashboardPreferences.showFileTypeTable && (
+          <section className="table-section compact-module file-count-module">
             <div className="section-heading">
               <h2>File Type Counts</h2>
               <span>{stats.total_photos.toLocaleString()} indexed photos</span>
@@ -1426,6 +1460,8 @@ function App() {
               </tbody>
             </table>
           </section>
+              )}
+            </div>
           )}
         </section>
       )}

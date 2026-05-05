@@ -258,21 +258,24 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 The dashboard is organized around a branded header, top-level Scan Library and
-Metadata Search tool cards, and an Insights section. Scan Library combines new
-scans, metadata refreshes, cancellation, resume/rerun actions, collapsible scan
-history, and one concise info popover for scan terminology. Metadata Search
-stays as a separate tool. If a folder has already been scanned, the dashboard
-asks the user to choose Refresh metadata, Scan anyway, or Cancel before starting
-another scan.
+Metadata Search tool cards, and a colorful Insights section. Insight modules use
+a compact responsive grid on desktop, with varied card gradients for charts,
+file-type summaries, and stat cards. Scan Library combines new scans, metadata
+refreshes, cancellation, resume/rerun actions, collapsible scan history, and one
+concise info popover for scan terminology. Metadata Search stays as a separate
+tool. If a folder has already been scanned, the dashboard asks the user to choose
+Refresh metadata, Scan anyway, or Cancel before starting another scan.
 
 The local "Customize Dashboard" panel lives under Settings. Users can toggle
 individual cards, charts, search/history sections, and the file type table, and
 those preferences are saved in browser `localStorage` on that device. The
-capture timeline is labeled "Capture Timeline where available" because imported
-or exported archives may carry added/export dates instead of true capture dates.
+Capture Timeline only includes files with EXIF capture dates (`date_taken`);
+files without capture dates are excluded instead of falling back to modified or
+directory dates.
 
 ## Status
 
-v1.0 polish focuses on a cleaner blue/cyan/violet dashboard, safer rescan
-choices, consolidated scan tooling, and clearer timeline labeling. Duplicates,
-maps, open-in-folder, previews, and external job services remain future work.
+v1.2 visual polish focuses on a more colorful, compact, insight-forward
+dashboard while preserving the existing scan, search, and customization
+behavior. Duplicates, maps, open-in-folder, previews, and external job services
+remain future work.
