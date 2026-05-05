@@ -860,6 +860,35 @@ function AnalyticsIcon() {
   );
 }
 
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+      <circle
+        cx="20"
+        cy="20"
+        r="5.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.6"
+      />
+      <path
+        d="M20 7v5M20 28v5M7 20h5M28 20h5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10.8 10.8l3.5 3.5M25.7 25.7l3.5 3.5M29.2 10.8l-3.5 3.5M14.3 25.7l-3.5 3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
@@ -1535,8 +1564,11 @@ function App() {
           type="button"
           className="settings-button"
           onClick={() => setIsSettingsOpen((currentValue) => !currentValue)}
+          aria-expanded={isSettingsOpen}
+          aria-controls="dashboard-settings"
         >
-          {isSettingsOpen ? "Close Settings" : "Settings"}
+          <SettingsIcon />
+          <span>{isSettingsOpen ? "Close Settings" : "Settings"}</span>
         </button>
       </section>
 

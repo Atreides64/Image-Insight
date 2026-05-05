@@ -101,9 +101,13 @@ h2 {
 }
 
 .settings-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   border: 1px solid #314055;
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 9px 12px;
   color: #edf5ff;
   background: linear-gradient(180deg, #1a2940, #111925);
   font-weight: 800;
@@ -113,6 +117,13 @@ h2 {
     border-color 0.16s ease,
     box-shadow 0.16s ease,
     transform 0.16s ease;
+}
+
+.settings-button svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+  flex: 0 0 22px;
 }
 
 .settings-button:hover,
@@ -170,7 +181,13 @@ h2 {
 }
 
 .settings-panel {
-  order: 3;
+  order: 1;
+  align-self: flex-end;
+  width: min(860px, 100%);
+  max-height: min(72vh, 680px);
+  margin-top: -14px;
+  overflow: auto;
+  z-index: 30;
 }
 
 .state-message,
@@ -179,12 +196,12 @@ h2 {
 }
 
 .tools-section {
-  order: 1;
+  order: 2;
   align-self: stretch;
 }
 
 .tool-detail {
-  order: 2;
+  order: 3;
 }
 
 .insights-section {
@@ -417,7 +434,9 @@ h2 {
   border-color: rgba(125, 211, 252, 0.42);
   border-radius: 8px;
   margin-bottom: 18px;
-  overflow: hidden;
+  position: relative;
+  overflow: visible;
+  z-index: 10;
   background:
     linear-gradient(135deg, rgba(125, 211, 252, 0.12), rgba(14, 165, 233, 0.06)),
     #111b29;
@@ -1071,7 +1090,7 @@ h2 {
   position: absolute;
   right: 0;
   bottom: calc(100% + 8px);
-  z-index: 5;
+  z-index: 100;
   width: min(280px, 70vw);
   border: 1px solid #314055;
   border-radius: 8px;

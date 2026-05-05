@@ -29,6 +29,7 @@ Image Insight has a FastAPI backend with `/health`, `/system-info`, `POST /scan-
 - Added `docs/packaging-plan.md` with a Windows desktop packaging roadmap comparing Tauri and Electron, recommending Tauri, and outlining backend sidecar, database path, startup/shutdown, and native folder picker strategy.
 - Modified `frontend/src/App.tsx` and `frontend/src/styles.css` for v1.4 package-prep analytics cleanup by collapsing raw chart data by default, adding a compact chart summary, and improving Analytics Explorer Y-axis margins and compact tick labels.
 - Added `frontend/src-tauri` with the first Tauri 2 desktop shell, wired `desktop:dev` and `desktop:build` npm scripts, and kept backend startup out of scope for this step.
+- Modified `frontend/src/App.tsx` and `frontend/src/styles.css` to give Settings a top gear-icon control with a compact near-header panel and to prevent Scan Library info popovers from clipping.
 - Modified `tests/test_api.py` to cover system info, forced backfill of previously null lens/focal-length metadata, cancellation of a running scan, and expanded scan session fields.
 - Modified `AGENTS.md` to fix stale scan-status wording, the `photo_timeline` endpoint reference, and pytest capitalization.
 - Modified `README.md`, `AGENTS.md`, and `docs/progress.md`.
@@ -173,3 +174,4 @@ Open:
 - 2026-05-05: Added a desktop packaging plan recommending Tauri 2 with a bundled Python backend sidecar, app-local SQLite storage, and a native folder picker.
 - 2026-05-05: Started v1.4 package-prep polish with collapsed Analytics Explorer raw chart data and more readable Y-axis labels for custom bar, line, and grouped charts.
 - 2026-05-05: Added the first Tauri 2 desktop shell under `frontend/src-tauri`, with Vite dev-server integration, built-asset configuration, and desktop npm scripts.
+- 2026-05-05: Refined top-level Settings access with a gear icon and compact near-header panel, and fixed Scan Library info popover clipping.
