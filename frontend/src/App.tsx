@@ -1614,85 +1614,84 @@ function App() {
           <span>{scanHistory.length.toLocaleString()} recent scans</span>
         </div>
 
-        {isScanHistoryOpen && (
-      <section id="scan-history-panel" className="table-section embedded-history">
-        <table>
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>Folder</th>
-              <th>Matched</th>
-              <th>Changes</th>
-              <th>Duration</th>
-              <th>Completed</th>
-              <th>Action</th>
+{isScanHistoryOpen && (
+  <section id="scan-history-panel" className="table-section embedded-history">
+    <table>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Folder</th>
+          <th>Matched</th>
+          <th>Changes</th>
+          <th>Duration</th>
+          <th>Completed</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {scanHistory.length > 0 ? (
+          scanHistory.map((scanSession) => (
+            <tr key={scanSession.scan_id}>
+              <td>
+                <span className={`scan-status ${scanSession.status}`}>
+                  {formatScanStatus(scanSession.status)}
+                </span>
+              </td>
+              <td>{scanSession.folder_path}</td>
+              <td>{scanSession.image_files_matched.toLocaleString()}</td>
+              <td>
+                {scanSession.new_files.toLocaleString()} new,{" "}
+                {scanSession.updated_files.toLocaleString()} updated,{" "}
+                {scanSession.failed_files.toLocaleString()} failed
+              </td>
+              <td>{scanSession.elapsed_seconds.toFixed(2)}s</td>
+              <td>{formatDate(scanSession.completed_at)}</td>
+              <td>
+                <div className="table-actions">
+                  <button
+                    type="button"
+                    className="small-action-button"
+                    onClick={() =>
+                      void runScan({
+                        resume: false,
+                        confirmRescan: true,
+                        targetFolderPath: scanSession.folder_path,
+                      })
+                    }
+                    disabled={isScanning}
+                  >
+                    Rerun
+                  </button>
+                  {canResumeScan(scanSession) && (
+                    <button
+                      type="button"
+                      className="small-action-button"
+                      onClick={() =>
+                        void runScan({
+                          resume: true,
+                          targetFolderPath: scanSession.folder_path,
+                        })
+                      }
+                      disabled={isScanning}
+                    >
+                      Resume
+                    </button>
+                  )}
+                </div>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {scanHistory.length > 0 ? (
-              scanHistory.map((scanSession) => (
-                <tr key={scanSession.scan_id}>
-                  <td>
-                    <span className={`scan-status ${scanSession.status}`}>
-                      {formatScanStatus(scanSession.status)}
-                    </span>
-                  </td>
-                  <td>{scanSession.folder_path}</td>
-                  <td>{scanSession.image_files_matched.toLocaleString()}</td>
-                  <td>
-                    {scanSession.new_files.toLocaleString()} new,{" "}
-                    {scanSession.updated_files.toLocaleString()} updated,{" "}
-                    {scanSession.failed_files.toLocaleString()} failed
-                  </td>
-                  <td>{scanSession.elapsed_seconds.toFixed(2)}s</td>
-                  <td>{formatDate(scanSession.completed_at)}</td>
-                  <td>
-                    <div className="table-actions">
-                      <button
-                        type="button"
-                        className="small-action-button"
-                        onClick={() =>
-                          void runScan({
-                            resume: false,
-                            confirmRescan: true,
-                            targetFolderPath: scanSession.folder_path,
-                          })
-                        }
-                        disabled={isScanning}
-                      >
-                        Rerun
-                      </button>
-                      {canResumeScan(scanSession) && (
-                        <button
-                          type="button"
-                          className="small-action-button"
-                          onClick={() =>
-                            void runScan({
-                              resume: true,
-                              targetFolderPath: scanSession.folder_path,
-                            })
-                          }
-                          disabled={isScanning}
-                        >
-                          Resume
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={7}>
-                  No scan history yet. Start with a local photo folder above.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+          ))
+        ) : (
+          <tr>
+            <td colSpan={7}>
+              No scan history yet. Start with a local photo folder above.
+            </td>
+          </tr>
         )}
-      </section>
-        )}
+      </tbody>
+    </table>
+  </section>
+)}
       </section>
       )}
 
