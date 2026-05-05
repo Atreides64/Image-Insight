@@ -71,7 +71,7 @@ def test_system_info_returns_runtime_visibility(monkeypatch) -> None:
     data = response.json()
 
     assert response.status_code == 200
-    assert data["app_version"] == "0.8.0"
+    assert data["app_version"] == "1.3.0"
     assert data["database_path"].endswith("image_insight_test.db")
     assert isinstance(data["photo_count"], int)
     assert isinstance(data["scan_session_count"], int)
@@ -100,6 +100,11 @@ def test_stats_returns_valid_json_structure() -> None:
         "most_common_aperture",
         "most_common_shutter_speed",
         "average_file_size_by_camera",
+        "top_capture_dates",
+        "iso_distribution",
+        "aperture_distribution",
+        "shutter_speed_buckets",
+        "focal_length_usage_over_time",
         "photos_with_capture_date",
         "photos_missing_capture_date",
         "photos_by_year",
@@ -123,6 +128,11 @@ def test_stats_returns_valid_json_structure() -> None:
     assert isinstance(data["top_lenses"], list)
     assert isinstance(data["top_focal_lengths"], list)
     assert isinstance(data["average_file_size_by_camera"], list)
+    assert isinstance(data["top_capture_dates"], list)
+    assert isinstance(data["iso_distribution"], list)
+    assert isinstance(data["aperture_distribution"], list)
+    assert isinstance(data["shutter_speed_buckets"], list)
+    assert isinstance(data["focal_length_usage_over_time"], list)
     assert isinstance(data["photos_with_capture_date"], int)
     assert isinstance(data["photos_missing_capture_date"], int)
     assert isinstance(data["photos_by_year"], list)
@@ -140,6 +150,23 @@ def test_camera_type_classification_uses_make_model_heuristics() -> None:
     assert main_module.classify_camera_type("Fujifilm", "X-T5") == "camera"
     assert main_module.classify_camera_type("Mystery", "Box") == "unknown"
     assert main_module.classify_camera_type(None, None) == "unknown"
+
+
+def test_usage_timeline_omits_missing_series_instead_of_zero_drops() -> None:
+    rows = [
+        ("2024-01", "Canon EOS R5", 2),
+        ("2024-03", "Canon EOS R5", 1),
+        ("2024-02", "Sony ILCE-7M4", 3),
+    ]
+
+    timeline = main_module.build_usage_timeline(
+        rows,
+        ["Canon EOS R5", "Sony ILCE-7M4"],
+    )
+    february = next(row for row in timeline if row["label"] == "2024-02")
+
+    assert february == {"label": "2024-02", "Sony ILCE-7M4": 3}
+    assert "Canon EOS R5" not in february
 
 
 def test_stats_returns_default_insight_fields_and_device_counts(tmp_path: Path) -> None:
@@ -924,7 +951,24 @@ def test_search_photos_filters_metadata(tmp_path: Path) -> None:
     assert data["total_count"] == 1
     assert data["limit"] == 50
     assert data["offset"] == 0
+    assert data["sort_by"] == "date_taken"
+    assert data["sort_order"] == "desc"
     assert [photo["filename"] for photo in data["results"]] == ["canon-wide.jpg"]
+    result = data["results"][0]
+    assert {
+        "filename",
+        "path",
+        "extension",
+        "size_bytes",
+        "date_taken",
+        "camera_model",
+        "lens_model",
+        "focal_length",
+        "iso",
+        "aperture",
+        "shutter_speed",
+        "device_type",
+    }.issubset(result)
 
     lens_response = client.get(
         "/photos/search",
@@ -947,6 +991,135 @@ def test_search_photos_filters_metadata(tmp_path: Path) -> None:
 
     assert null_safe_response.status_code == 200
     assert str(tmp_path / "fuji-street.png") not in returned_paths
+
+
+def test_search_photos_supports_sorting_and_paginated_fields(tmp_path: Path) -> None:
+    with SessionLocal() as session:
+        photos = [
+            Photo(
+                filename="sort-small.jpg",
+                path=str(tmp_path / "sort-small.jpg"),
+                extension="jpg",
+                size_bytes=50,
+                modified_at=datetime(2024, 5, 1, tzinfo=timezone.utc),
+                scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                camera_make="Canon",
+                camera_model="EOS R6",
+                lens_model="RF35",
+                focal_length=35.0,
+                iso=100,
+                aperture=1.8,
+                shutter_speed="1/500s",
+                date_taken=datetime(2024, 5, 1, tzinfo=timezone.utc),
+            ),
+            Photo(
+                filename="sort-large.raf",
+                path=str(tmp_path / "sort-large.raf"),
+                extension="raf",
+                size_bytes=500,
+                modified_at=datetime(2024, 5, 2, tzinfo=timezone.utc),
+                scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                camera_make="Fujifilm",
+                camera_model="X-H2",
+                lens_model="XF16",
+                focal_length=16.0,
+                iso=800,
+                aperture=4.0,
+                shutter_speed="1/125s",
+                date_taken=datetime(2024, 5, 2, tzinfo=timezone.utc),
+            ),
+        ]
+        session.add_all(photos)
+        session.commit()
+
+    response = client.get(
+        "/photos/search",
+        params={
+            "date_from": "2024-05-01",
+            "date_to": "2024-05-31",
+            "sort_by": "size_bytes",
+            "sort_order": "desc",
+            "limit": 1,
+            "offset": 0,
+        },
+    )
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["total_count"] == 2
+    assert data["limit"] == 1
+    assert data["offset"] == 0
+    assert data["sort_by"] == "size_bytes"
+    assert data["sort_order"] == "desc"
+    assert data["results"][0]["filename"] == "sort-large.raf"
+    assert data["results"][0]["device_type"] == "camera"
+
+    invalid_sort_response = client.get(
+        "/photos/search",
+        params={"sort_by": "rating"},
+    )
+
+    assert invalid_sort_response.status_code == 400
+
+
+def test_search_photos_sorts_common_metadata_fields(tmp_path: Path) -> None:
+    with SessionLocal() as session:
+        session.add_all(
+            [
+                Photo(
+                    filename="sort-alpha.jpg",
+                    path=str(tmp_path / "sort-alpha.jpg"),
+                    extension="jpg",
+                    size_bytes=100,
+                    modified_at=datetime(2024, 8, 1, tzinfo=timezone.utc),
+                    scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    camera_make="Canon",
+                    camera_model="Alpha",
+                    lens_model="Wide",
+                    focal_length=24.0,
+                    iso=100,
+                    aperture=2.8,
+                    shutter_speed="1/250s",
+                    date_taken=datetime(2024, 8, 1, tzinfo=timezone.utc),
+                ),
+                Photo(
+                    filename="sort-beta.jpg",
+                    path=str(tmp_path / "sort-beta.jpg"),
+                    extension="jpg",
+                    size_bytes=300,
+                    modified_at=datetime(2024, 8, 3, tzinfo=timezone.utc),
+                    scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    camera_make="Nikon",
+                    camera_model="Beta",
+                    lens_model="Tele",
+                    focal_length=85.0,
+                    iso=200,
+                    aperture=4.0,
+                    shutter_speed="1/125s",
+                    date_taken=datetime(2024, 8, 3, tzinfo=timezone.utc),
+                ),
+            ]
+        )
+        session.commit()
+
+    params = {"date_from": "2024-08-01", "date_to": "2024-08-31", "limit": 2}
+    expectations = [
+        ("date_taken", "desc", ["sort-beta.jpg", "sort-alpha.jpg"]),
+        ("camera_model", "asc", ["sort-alpha.jpg", "sort-beta.jpg"]),
+        ("lens_model", "asc", ["sort-beta.jpg", "sort-alpha.jpg"]),
+        ("focal_length", "desc", ["sort-beta.jpg", "sort-alpha.jpg"]),
+        ("size_bytes", "asc", ["sort-alpha.jpg", "sort-beta.jpg"]),
+    ]
+
+    for sort_by, sort_order, filenames in expectations:
+        response = client.get(
+            "/photos/search",
+            params={**params, "sort_by": sort_by, "sort_order": sort_order},
+        )
+        data = response.json()
+
+        assert response.status_code == 200
+        assert [photo["filename"] for photo in data["results"]] == filenames
 
 
 def test_search_photos_filters_exposure_file_type_and_device_type(
@@ -1043,12 +1216,115 @@ def test_photo_search_options_returns_distinct_values(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "Sony ILCE-7M4" in data["cameras"]
+    assert "Sony ILCE-7M4" in data["camera_models"]
     assert "FE 35mm F1.8" in data["lenses"]
+    assert "FE 35mm F1.8" in data["lens_models"]
     assert "jpg" in data["extensions"]
     assert 800 in data["iso_values"]
     assert 1.8 in data["aperture_values"]
     assert "1/500s" in data["shutter_speed_values"]
     assert data["device_types"] == ["phone", "camera", "unknown"]
+
+
+def test_analytics_returns_chart_friendly_rows_and_validates_combinations(
+    tmp_path: Path,
+) -> None:
+    with SessionLocal() as session:
+        session.add_all(
+            [
+                Photo(
+                    filename="analytics-canon.jpg",
+                    path=str(tmp_path / "analytics-canon.jpg"),
+                    extension="jpg",
+                    size_bytes=100,
+                    modified_at=datetime(2024, 6, 1, tzinfo=timezone.utc),
+                    scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    camera_make="Canon",
+                    camera_model="EOS R5",
+                    lens_model="RF50",
+                    focal_length=50.0,
+                    iso=400,
+                    aperture=2.8,
+                    shutter_speed="1/250s",
+                    date_taken=datetime(2024, 6, 1, tzinfo=timezone.utc),
+                ),
+                Photo(
+                    filename="analytics-sony.v13raf",
+                    path=str(tmp_path / "analytics-sony.v13raf"),
+                    extension="v13raf",
+                    size_bytes=300,
+                    modified_at=datetime(2024, 7, 1, tzinfo=timezone.utc),
+                    scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    camera_make="Sony",
+                    camera_model="ILCE-7M4",
+                    lens_model="FE35",
+                    focal_length=35.0,
+                    iso=800,
+                    aperture=1.8,
+                    shutter_speed="1/1000s",
+                    date_taken=datetime(2024, 7, 1, tzinfo=timezone.utc),
+                ),
+            ]
+        )
+        session.commit()
+
+    grouped_response = client.get(
+        "/analytics",
+        params={
+            "x_axis": "capture_month",
+            "metric": "photo_count",
+            "group_by": "camera_model",
+        },
+    )
+    grouped_data = grouped_response.json()
+
+    assert grouped_response.status_code == 200
+    assert grouped_data["x_axis"] == "capture_month"
+    assert grouped_data["metric"] == "photo_count"
+    assert grouped_data["group_by"] == "camera_model"
+    assert grouped_data["offset"] == 0
+    assert grouped_data["total_count"] >= 2
+    assert "Canon EOS R5" in grouped_data["series"]
+    assert any(row["label"] == "2024-06" for row in grouped_data["rows"])
+
+    avg_response = client.get(
+        "/analytics",
+        params={"x_axis": "extension", "metric": "avg_file_size"},
+    )
+    avg_data = avg_response.json()
+
+    assert avg_response.status_code == 200
+    assert any(row["label"] == "V13RAF" and row["value"] == 300 for row in avg_data["rows"])
+
+    duplicate_response = client.get(
+        "/analytics",
+        params={"x_axis": "camera_model", "group_by": "camera_model"},
+    )
+    invalid_metric_response = client.get(
+        "/analytics",
+        params={"metric": "median_file_size"},
+    )
+    paginated_response = client.get(
+        "/analytics",
+        params={
+            "x_axis": "capture_date",
+            "metric": "photo_count",
+            "date_from": "2024-06-01",
+            "date_to": "2024-07-31",
+            "limit": 1,
+            "offset": 1,
+        },
+    )
+    paginated_data = paginated_response.json()
+
+    assert duplicate_response.status_code == 400
+    assert duplicate_response.json()["detail"] == "x_axis and group_by must differ"
+    assert invalid_metric_response.status_code == 400
+    assert paginated_response.status_code == 200
+    assert paginated_data["limit"] == 1
+    assert paginated_data["offset"] == 1
+    assert paginated_data["total_count"] >= 2
+    assert len(paginated_data["rows"]) == 1
 
 
 def test_search_photos_pagination_defaults_and_caps() -> None:
@@ -1062,7 +1338,14 @@ def test_search_photos_pagination_defaults_and_caps() -> None:
     capped_data = capped_response.json()
 
     assert default_response.status_code == 200
-    assert set(default_data) == {"total_count", "limit", "offset", "results"}
+    assert set(default_data) == {
+        "total_count",
+        "limit",
+        "offset",
+        "sort_by",
+        "sort_order",
+        "results",
+    }
     assert default_data["limit"] == 50
     assert default_data["offset"] == 0
     assert isinstance(default_data["total_count"], int)

@@ -280,6 +280,10 @@ h2 {
   background: linear-gradient(135deg, rgba(169, 135, 255, 0.42), rgba(125, 211, 252, 0.14) 48%, transparent 70%);
 }
 
+.tool-card.analytics-card::before {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.38), rgba(169, 135, 255, 0.14) 48%, transparent 70%);
+}
+
 .tool-card.recommended {
   border-color: rgba(125, 211, 252, 0.76);
   box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.22), 0 16px 42px rgba(90, 155, 255, 0.16);
@@ -309,6 +313,11 @@ h2 {
 .search-card .tool-card-icon {
   color: #a987ff;
   background: rgba(169, 135, 255, 0.14);
+}
+
+.analytics-card .tool-card-icon {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.14);
 }
 
 .tool-card-copy {
@@ -545,7 +554,7 @@ h2 {
 
 .search-form {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 12px;
   padding: 22px;
 }
@@ -598,6 +607,8 @@ h2 {
 .scan-controls input,
 .search-form input,
 .search-form select {
+  width: 100%;
+  height: 46px;
   min-width: 0;
   border: 1px solid #314055;
   border-radius: 8px;
@@ -605,6 +616,10 @@ h2 {
   color: #edf5ff;
   background: #0f1722;
   outline: none;
+}
+
+.search-form select {
+  cursor: pointer;
 }
 
 .scan-controls input:focus,
@@ -679,6 +694,7 @@ h2 {
 
 .search-form button {
   align-self: end;
+  min-height: 46px;
 }
 
 .search-results {
@@ -687,10 +703,110 @@ h2 {
 
 .search-results-summary {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 16px;
   padding: 14px 22px;
   color: #a7b3c6;
+}
+
+.column-picker,
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 22px 14px;
+}
+
+.column-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #314055;
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #c6d3e6;
+  background: #101823;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.column-picker input {
+  accent-color: #a987ff;
+}
+
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 14px 22px 20px;
+}
+
+.analytics-section {
+  border-color: rgba(251, 191, 36, 0.28);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.09), rgba(169, 135, 255, 0.08)), #101823;
+}
+
+.preset-row {
+  padding-top: 18px;
+}
+
+.analytics-chart {
+  margin: 0 22px 22px;
+}
+
+.chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.chart-scroll-inner {
+  height: 300px;
+}
+
+.series-tooltip {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #2f3d52;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #edf5ff;
+  background: #121a26;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+}
+
+.series-tooltip span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #c6d3e6;
+  font-size: 0.84rem;
+}
+
+.series-tooltip i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+}
+
+.analytics-result-list {
+  max-height: 220px;
+  overflow: auto;
+  border-top: 1px solid #273244;
+}
+
+.analytics-result-list table {
+  min-width: 520px;
+}
+
+.timeline-module.compact-module .chart-frame {
+  height: 176px;
+  padding-bottom: 0;
+}
+
+.donut-chart {
+  display: grid;
+  place-items: center;
 }
 
 .collapsed-summary {

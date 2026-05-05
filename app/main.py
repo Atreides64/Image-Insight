@@ -11,7 +11,7 @@ from threading import Lock, Thread
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import ExifTags, Image, UnidentifiedImageError
-from sqlalchemy import and_, func, not_, or_, text
+from sqlalchemy import and_, case, func, not_, or_, text
 
 from app.database import Base, DATABASE_URL, DEFAULT_DATABASE_PATH, SessionLocal, engine
 from app.models import Photo, ScanSession, ScanSessionFile
@@ -32,7 +32,7 @@ RESUMABLE_SCAN_STATUSES = {"running", "interrupted", "failed"}
 RESTART_INTERRUPTED_SCAN_ERROR = "Scan interrupted because the application restarted."
 CANCELLED_SCAN_IDS: set[int] = set()
 CANCELLED_SCAN_IDS_LOCK = Lock()
-APP_VERSION = "0.8.0"
+APP_VERSION = "1.3.0"
 
 app = FastAPI(
     title="Image Insight API",
@@ -583,6 +583,7 @@ def format_photo(photo: Photo) -> dict[str, object]:
         "aperture": photo.aperture,
         "shutter_speed": photo.shutter_speed,
         "date_taken": photo.date_taken.isoformat() if photo.date_taken else None,
+        "device_type": classify_camera_type(photo.camera_make, photo.camera_model),
     }
 
 
@@ -643,10 +644,25 @@ def build_usage_timeline(
     return [
         {
             "label": month,
-            **{label: buckets[month].get(label, 0) for label in selected_labels},
+            **{
+                label: count
+                for label, count in buckets[month].items()
+                if label in selected_labels
+            },
         }
         for month in sorted(buckets)
     ]
+
+
+def camera_label(camera_make: str | None, camera_model: str | None) -> str | None:
+    label = " ".join(part for part in (camera_make, camera_model) if part).strip()
+    return label or None
+
+
+def camera_label_expression():
+    return func.trim(
+        func.coalesce(Photo.camera_make, "") + " " + func.coalesce(Photo.camera_model, "")
+    )
 
 
 def classify_camera_type(camera_make: str | None, camera_model: str | None) -> str:
@@ -685,7 +701,7 @@ def classify_camera_type(camera_make: str | None, camera_model: str | None) -> s
     return "unknown"
 
 
-def camera_type_expression(device_type: str):
+def camera_type_match_expressions():
     phone_expression = or_(
         Photo.camera_make.ilike("%iPhone%"),
         Photo.camera_model.ilike("%iPhone%"),
@@ -723,6 +739,12 @@ def camera_type_expression(device_type: str):
         Photo.camera_model.ilike("%Leica%"),
     )
 
+    return phone_expression, camera_expression
+
+
+def camera_type_expression(device_type: str):
+    phone_expression, camera_expression = camera_type_match_expressions()
+
     if device_type == "phone":
         return phone_expression
     if device_type == "camera":
@@ -731,6 +753,59 @@ def camera_type_expression(device_type: str):
         return and_(not_(phone_expression), not_(camera_expression))
 
     return None
+
+
+def camera_type_label_expression():
+    phone_expression, camera_expression = camera_type_match_expressions()
+
+    return case(
+        (phone_expression, "phone"),
+        (camera_expression, "camera"),
+        else_="unknown",
+    )
+
+
+def shutter_speed_bucket(value: str | None) -> str | None:
+    if not value:
+        return None
+
+    normalized_value = value.removesuffix("s")
+
+    try:
+        if "/" in normalized_value:
+            numerator, denominator = normalized_value.split("/", maxsplit=1)
+            seconds = float(numerator) / float(denominator)
+        else:
+            seconds = float(normalized_value)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return value
+
+    if seconds <= 1 / 1000:
+        return "1/1000s or faster"
+    if seconds <= 1 / 250:
+        return "1/250s-1/999s"
+    if seconds <= 1 / 60:
+        return "1/60s-1/249s"
+    if seconds < 1:
+        return "Under 1s"
+
+    return "1s or slower"
+
+
+def focal_length_bucket(value: float | None) -> str | None:
+    if value is None:
+        return None
+
+    if value < 24:
+        return "Under 24mm"
+    if value < 35:
+        return "24-34mm"
+    if value < 70:
+        return "35-69mm"
+    if value < 135:
+        return "70-134mm"
+
+    return "135mm+"
 
 
 def normalize_datetime(value: datetime) -> datetime:
@@ -1512,6 +1587,8 @@ def search_photos(
     date_to: str | None = None,
     extension: str | None = None,
     device_type: str | None = None,
+    sort_by: str = "date_taken",
+    sort_order: str = "desc",
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, object]:
@@ -1530,6 +1607,20 @@ def search_photos(
     normalized_extension = extension.strip().lower().lstrip(".") if extension else None
     normalized_shutter_speed = shutter_speed.strip() if shutter_speed else None
     normalized_device_type = device_type.strip().lower() if device_type else None
+    normalized_sort_by = sort_by.strip().lower()
+    normalized_sort_order = sort_order.strip().lower()
+    sort_columns = {
+        "date_taken": Photo.date_taken,
+        "camera_model": camera_label_expression(),
+        "lens_model": Photo.lens_model,
+        "focal_length": Photo.focal_length,
+        "iso": Photo.iso,
+        "aperture": Photo.aperture,
+        "shutter_speed": Photo.shutter_speed,
+        "size_bytes": Photo.size_bytes,
+        "extension": Photo.extension,
+        "device_type": camera_type_label_expression(),
+    }
 
     if parsed_date_from and parsed_date_to and parsed_date_from > parsed_date_to:
         raise HTTPException(status_code=400, detail="date_from must be before date_to")
@@ -1553,6 +1644,18 @@ def search_photos(
             status_code=400,
             detail="device_type must be phone, camera, or unknown",
         )
+
+    if normalized_sort_by not in sort_columns:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "sort_by must be one of "
+                + ", ".join(sorted(sort_columns))
+            ),
+        )
+
+    if normalized_sort_order not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail="sort_order must be asc or desc")
 
     with SessionLocal() as session:
         query = session.query(Photo)
@@ -1601,8 +1704,14 @@ def search_photos(
                 query = query.filter(expression)
 
         total_count = query.count()
+        sort_column = sort_columns[normalized_sort_by]
+        sort_expression = (
+            sort_column.asc()
+            if normalized_sort_order == "asc"
+            else sort_column.desc()
+        )
         photos = (
-            query.order_by(Photo.date_taken.desc(), Photo.id.desc())
+            query.order_by(sort_expression, Photo.id.desc())
             .offset(offset)
             .limit(limit)
             .all()
@@ -1612,6 +1721,8 @@ def search_photos(
         "total_count": total_count,
         "limit": limit,
         "offset": offset,
+        "sort_by": normalized_sort_by,
+        "sort_order": normalized_sort_order,
         "results": [format_photo(photo) for photo in photos],
     }
 
@@ -1681,6 +1792,8 @@ def photo_search_options(limit: int = 100) -> dict[str, object]:
 
     return {
         "limit": limit,
+        "camera_models": cameras,
+        "lens_models": [row[0] for row in lens_rows],
         "cameras": cameras,
         "lenses": [row[0] for row in lens_rows],
         "extensions": [row[0] for row in extension_rows],
@@ -1688,6 +1801,203 @@ def photo_search_options(limit: int = 100) -> dict[str, object]:
         "aperture_values": [row[0] for row in aperture_rows],
         "shutter_speed_values": [row[0] for row in shutter_speed_rows],
         "device_types": ["phone", "camera", "unknown"],
+    }
+
+
+ANALYTICS_DIMENSIONS = {
+    "capture_month",
+    "capture_date",
+    "camera_model",
+    "lens_model",
+    "extension",
+    "device_type",
+    "iso",
+    "aperture",
+    "shutter_speed_bucket",
+    "focal_length_bucket",
+}
+ANALYTICS_METRICS = {"photo_count", "avg_file_size", "total_file_size"}
+ANALYTICS_GROUP_BY = {"camera_model", "lens_model", "extension", "device_type"}
+
+
+def analytics_dimension_value(photo: Photo, dimension: str) -> str | None:
+    if dimension == "capture_month":
+        return photo.date_taken.strftime("%Y-%m") if photo.date_taken else None
+    if dimension == "capture_date":
+        return photo.date_taken.strftime("%Y-%m-%d") if photo.date_taken else None
+    if dimension == "camera_model":
+        return camera_label(photo.camera_make, photo.camera_model)
+    if dimension == "lens_model":
+        return photo.lens_model
+    if dimension == "extension":
+        return photo.extension.upper() if photo.extension else None
+    if dimension == "device_type":
+        return classify_camera_type(photo.camera_make, photo.camera_model)
+    if dimension == "iso":
+        return str(photo.iso) if photo.iso is not None else None
+    if dimension == "aperture":
+        return format_aperture(photo.aperture)
+    if dimension == "shutter_speed_bucket":
+        return shutter_speed_bucket(photo.shutter_speed)
+    if dimension == "focal_length_bucket":
+        return focal_length_bucket(photo.focal_length)
+
+    return None
+
+
+def analytics_metric_value(metric: str, size_total: int, count: int) -> float | int:
+    if metric == "photo_count":
+        return count
+    if metric == "avg_file_size":
+        return round(size_total / count, 2) if count else 0
+    if metric == "total_file_size":
+        return size_total
+
+    return 0
+
+
+def analytics_sort_key(label: str) -> tuple[int, object]:
+    for date_format in ("%Y-%m-%d", "%Y-%m"):
+        try:
+            return (0, datetime.strptime(label, date_format))
+        except ValueError:
+            continue
+
+    return (1, label)
+
+
+@app.get("/analytics")
+def get_analytics(
+    x_axis: str = "capture_month",
+    metric: str = "photo_count",
+    group_by: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, object]:
+    normalized_x_axis = x_axis.strip().lower()
+    normalized_metric = metric.strip().lower()
+    normalized_group_by = group_by.strip().lower() if group_by else None
+
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="limit must be 1 or greater")
+
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be 0 or greater")
+
+    limit = min(limit, 250)
+    parsed_date_from = parse_search_datetime(date_from, end_of_day=False)
+    parsed_date_to = parse_search_datetime(date_to, end_of_day=True)
+
+    if normalized_x_axis not in ANALYTICS_DIMENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="x_axis must be one of " + ", ".join(sorted(ANALYTICS_DIMENSIONS)),
+        )
+
+    if normalized_metric not in ANALYTICS_METRICS:
+        raise HTTPException(
+            status_code=400,
+            detail="metric must be one of " + ", ".join(sorted(ANALYTICS_METRICS)),
+        )
+
+    if normalized_group_by and normalized_group_by not in ANALYTICS_GROUP_BY:
+        raise HTTPException(
+            status_code=400,
+            detail="group_by must be one of " + ", ".join(sorted(ANALYTICS_GROUP_BY)),
+        )
+
+    if normalized_group_by == normalized_x_axis:
+        raise HTTPException(status_code=400, detail="x_axis and group_by must differ")
+
+    if parsed_date_from and parsed_date_to and parsed_date_from > parsed_date_to:
+        raise HTTPException(status_code=400, detail="date_from must be before date_to")
+
+    with SessionLocal() as session:
+        query = session.query(Photo)
+
+        if parsed_date_from:
+            query = query.filter(Photo.date_taken >= parsed_date_from)
+
+        if parsed_date_to:
+            query = query.filter(Photo.date_taken <= parsed_date_to)
+
+        photos = query.all()
+
+    buckets: dict[str, dict[str | None, dict[str, int]]] = {}
+    for photo in photos:
+        x_label = analytics_dimension_value(photo, normalized_x_axis)
+        if not x_label:
+            continue
+
+        series_label = (
+            analytics_dimension_value(photo, normalized_group_by)
+            if normalized_group_by
+            else None
+        )
+        if normalized_group_by and not series_label:
+            continue
+
+        bucket = buckets.setdefault(x_label, {})
+        aggregate = bucket.setdefault(series_label, {"count": 0, "size": 0})
+        aggregate["count"] += 1
+        aggregate["size"] += photo.size_bytes
+
+    sorted_labels = sorted(buckets, key=analytics_sort_key)
+    if normalized_x_axis not in {"capture_month", "capture_date"}:
+        sorted_labels = sorted(
+            buckets,
+            key=lambda label: sum(
+                analytics_metric_value(
+                    normalized_metric,
+                    aggregate["size"],
+                    aggregate["count"],
+                )
+                for aggregate in buckets[label].values()
+            ),
+            reverse=True,
+        )
+
+    rows = []
+    series_names: list[str] = []
+    paginated_labels = sorted_labels[offset : offset + limit]
+    for label in paginated_labels:
+        if normalized_group_by:
+            row: dict[str, object] = {"label": label}
+            for series_label, aggregate in buckets[label].items():
+                if series_label is None:
+                    continue
+                if series_label not in series_names:
+                    series_names.append(series_label)
+                row[series_label] = analytics_metric_value(
+                    normalized_metric,
+                    aggregate["size"],
+                    aggregate["count"],
+                )
+            rows.append(row)
+        else:
+            aggregate = buckets[label][None]
+            rows.append(
+                {
+                    "label": label,
+                    "value": analytics_metric_value(
+                        normalized_metric,
+                        aggregate["size"],
+                        aggregate["count"],
+                    ),
+                }
+            )
+
+    return {
+        "x_axis": normalized_x_axis,
+        "metric": normalized_metric,
+        "group_by": normalized_group_by,
+        "limit": limit,
+        "offset": offset,
+        "total_count": len(sorted_labels),
+        "series": series_names[:10],
+        "rows": rows,
     }
 
 
@@ -1765,6 +2075,20 @@ def get_stats() -> dict[str, object]:
             .group_by(Photo.shutter_speed)
             .order_by(func.count(Photo.id).desc(), Photo.shutter_speed)
             .first()
+        )
+        iso_distribution_rows = (
+            session.query(Photo.iso, func.count(Photo.id))
+            .filter(Photo.iso.is_not(None))
+            .group_by(Photo.iso)
+            .order_by(Photo.iso)
+            .all()
+        )
+        aperture_distribution_rows = (
+            session.query(Photo.aperture, func.count(Photo.id))
+            .filter(Photo.aperture.is_not(None))
+            .group_by(Photo.aperture)
+            .order_by(Photo.aperture)
+            .all()
         )
         average_file_size_by_camera_rows = (
             session.query(
@@ -1856,6 +2180,17 @@ def get_stats() -> dict[str, object]:
             .order_by(func.count(Photo.id).desc(), "date")
             .first()
         )
+        top_capture_date_rows = (
+            session.query(
+                func.strftime("%Y-%m-%d", Photo.date_taken).label("date"),
+                func.count(Photo.id),
+            )
+            .filter(Photo.date_taken.is_not(None))
+            .group_by("date")
+            .order_by(func.count(Photo.id).desc(), "date")
+            .limit(5)
+            .all()
+        )
         timeline_detail_rows = (
             session.query(
                 func.strftime("%Y-%m", Photo.date_taken).label("month"),
@@ -1877,6 +2212,7 @@ def get_stats() -> dict[str, object]:
             .order_by("month")
             .all()
         )
+        analytics_photos = session.query(Photo).all()
 
     raw_vs_jpeg_counts = {
         "raw": raw_extension_count,
@@ -1913,6 +2249,30 @@ def get_stats() -> dict[str, object]:
     lens_usage_timeline = build_usage_timeline(
         lens_usage_timeline_rows,
         [str(row["label"]) for row in top_lenses],
+    )
+    shutter_bucket_counts = Counter(
+        bucket
+        for bucket in (shutter_speed_bucket(photo.shutter_speed) for photo in analytics_photos)
+        if bucket
+    )
+    focal_length_usage_rows = [
+        (
+            photo.date_taken.strftime("%Y-%m"),
+            focal_length_bucket(photo.focal_length),
+            1,
+        )
+        for photo in analytics_photos
+        if photo.date_taken and focal_length_bucket(photo.focal_length)
+    ]
+    top_focal_length_buckets = [
+        label
+        for label, _count in Counter(
+            row[1] for row in focal_length_usage_rows if row[1]
+        ).most_common(5)
+    ]
+    focal_length_usage_over_time = build_usage_timeline(
+        [(month, str(bucket), count) for month, bucket, count in focal_length_usage_rows if bucket],
+        top_focal_length_buckets,
     )
     top_focal_lengths = [
         {"label": format_focal_length(value), "count": count}
@@ -2021,6 +2381,21 @@ def get_stats() -> dict[str, object]:
             else None
         ),
         "average_file_size_by_camera": average_file_size_by_camera,
+        "top_capture_dates": format_count_rows(top_capture_date_rows),
+        "iso_distribution": [
+            {"label": str(value), "count": count}
+            for value, count in iso_distribution_rows
+        ],
+        "aperture_distribution": [
+            {"label": format_aperture(value), "count": count}
+            for value, count in aperture_distribution_rows
+            if format_aperture(value)
+        ],
+        "shutter_speed_buckets": [
+            {"label": label, "count": count}
+            for label, count in shutter_bucket_counts.most_common()
+        ],
+        "focal_length_usage_over_time": focal_length_usage_over_time,
         "photos_with_capture_date": capture_date_count,
         "photos_missing_capture_date": total_photos - capture_date_count,
         "photos_by_year": format_count_rows(year_rows),
