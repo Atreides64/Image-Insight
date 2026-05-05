@@ -26,6 +26,8 @@ Image Insight has a FastAPI backend with `/health`, `/system-info`, `POST /scan-
 - Modified `tests/test_api.py` to cover v1.3.0 search sorting/result fields, analytics valid/invalid combinations, and usage timelines without misleading zero drops.
 - Modified `app/main.py`, `frontend/src/App.tsx`, and `frontend/src/styles.css` to refine v1.3.0 search sorting refresh, analytics date range/offset support, friendly Analytics Explorer labels/presets, scrollable dense date analytics, color-dot tooltips, larger series palette, tighter capture-date chart spacing, and donut file type distribution.
 - Modified `tests/test_api.py` to prove sorting works across date, camera, lens, focal length, and file size plus analytics pagination metadata.
+- Added `docs/packaging-plan.md` with a Windows desktop packaging roadmap comparing Tauri and Electron, recommending Tauri, and outlining backend sidecar, database path, startup/shutdown, and native folder picker strategy.
+- Modified `frontend/src/App.tsx` and `frontend/src/styles.css` for v1.4 package-prep analytics cleanup by collapsing raw chart data by default, adding a compact chart summary, and improving Analytics Explorer Y-axis margins and compact tick labels.
 - Modified `tests/test_api.py` to cover system info, forced backfill of previously null lens/focal-length metadata, cancellation of a running scan, and expanded scan session fields.
 - Modified `AGENTS.md` to fix stale scan-status wording, the `photo_timeline` endpoint reference, and pytest capitalization.
 - Modified `README.md`, `AGENTS.md`, and `docs/progress.md`.
@@ -160,3 +162,5 @@ Open:
 - 2026-05-05: Added v1.2 analytics cleanup with credible capture metadata timeline filtering, expanded metadata search filters/options, compact search dropdowns/autocomplete, the average file size by type chart, camera/lens chart label cleanup, and removal of duplicate File Type Counts.
 - 2026-05-05: Added v1.3.0 Metadata Search and Custom Analytics with sortable expanded search results, column preferences, load-more pagination, `/analytics`, Analytics Explorer presets, top capture dates, distributions, and bucketed focal/shutter insights.
 - 2026-05-05: Refined v1.3.0 with automatic sort refresh in Metadata Search, friendlier Analytics Explorer controls/presets, dense capture-date analytics scrolling/date filters, expanded chart palette/tooltips, tighter top capture date spacing, and donut File Type Distribution.
+- 2026-05-05: Added a desktop packaging plan recommending Tauri 2 with a bundled Python backend sidecar, app-local SQLite storage, and a native folder picker.
+- 2026-05-05: Started v1.4 package-prep polish with collapsed Analytics Explorer raw chart data and more readable Y-axis labels for custom bar, line, and grouped charts.

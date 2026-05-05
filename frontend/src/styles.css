@@ -799,6 +799,29 @@ h2 {
   min-width: 520px;
 }
 
+.raw-data-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid #273244;
+  padding: 12px 14px;
+  color: #a7b3c6;
+}
+
+.raw-data-toggle div {
+  display: grid;
+  gap: 3px;
+}
+
+.raw-data-toggle strong {
+  color: #edf5ff;
+}
+
+.raw-data-toggle span {
+  font-size: 0.86rem;
+}
+
 .timeline-module.compact-module .chart-frame {
   height: 176px;
   padding-bottom: 0;
