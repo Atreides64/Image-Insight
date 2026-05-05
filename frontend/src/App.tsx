@@ -401,6 +401,7 @@ function App() {
   const [photoSearch, setPhotoSearch] = useState<PhotoSearchResponse | null>(null);
   const [isSearchingPhotos, setIsSearchingPhotos] = useState(false);
   const [photoSearchError, setPhotoSearchError] = useState<string | null>(null);
+  const [copiedPhotoId, setCopiedPhotoId] = useState<number | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<ActiveTool>(null);
   const [isScanHistoryOpen, setIsScanHistoryOpen] = useState(false);
@@ -735,6 +736,20 @@ function App() {
       ...currentFilters,
       [key]: value,
     }));
+  }
+
+  async function copyPhotoPath(photo: PhotoSearchResult) {
+    try {
+      await window.navigator.clipboard.writeText(photo.path);
+      setCopiedPhotoId(photo.id);
+      window.setTimeout(() => {
+        setCopiedPhotoId((currentPhotoId) =>
+          currentPhotoId === photo.id ? null : currentPhotoId,
+        );
+      }, 1800);
+    } catch {
+      setPhotoSearchError("Unable to copy the photo path from this browser.");
+    }
   }
 
   function updateDashboardPreference(key: keyof DashboardPreferences) {

@@ -12,6 +12,7 @@ Image Insight has a FastAPI backend with `/health`, `/system-info`, `POST /scan-
 - Modified `frontend/src/App.tsx` to make the Scan Folder, Metadata Search, and Scan History tool cards toggle their corresponding panels while collapsing inactive tools.
 - Modified `frontend/src/App.tsx` and `frontend/src/styles.css` to polish the v1.0 tool-card UI with feature-specific gradients, CSS visual accents, stronger hover/focus states, a more prominent IMAGE INSIGHT header, and a first-run scan onboarding state.
 - Modified `frontend/src/App.tsx` and `frontend/src/styles.css` to refine v1.0 branding to blue/cyan/violet, consolidate Scan Folder and Scan History into Scan Library, add rescan safety choices, add quick shortcuts, and clarify the capture timeline.
+- Modified `frontend/src/App.tsx` to restore the Metadata Search Copy Path action with clipboard copied-state handling.
 - Modified `tests/test_api.py` to cover system info, forced backfill of previously null lens/focal-length metadata, cancellation of a running scan, and expanded scan session fields.
 - Modified `AGENTS.md` to fix stale scan-status wording, the `photo_timeline` endpoint reference, and pytest capitalization.
 - Modified `README.md`, `AGENTS.md`, and `docs/progress.md`.
@@ -131,3 +132,4 @@ Open:
 - 2026-05-04: Tightened tool-card behavior so Scan Folder, Metadata Search, and Scan History each expand/collapse their panel and collapse inactive tools.
 - 2026-05-04: Polished the v1.0 tool-card UI with scan/search/history gradient accents, CSS-drawn card icons, stronger header treatment, improved focus/hover states, and first-run scan onboarding.
 - 2026-05-04: Refined the v1.0 dashboard redesign with blue/cyan/violet branding, Scan Library consolidation, rescan warning choices, quick shortcut navigation, and clearer capture timeline labeling.
+- 2026-05-05: Reviewed `docs/progress.md`, fixed the frontend Metadata Search Copy Path TypeScript error, and confirmed backend pytest, frontend build, and diff whitespace checks pass.
