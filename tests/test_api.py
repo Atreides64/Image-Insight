@@ -138,11 +138,13 @@ def test_scan_folder_starts_background_job_and_status_completes(tmp_path: Path) 
 
     assert scan_status["scan_id"] == data["scan_id"]
     assert scan_status["status"] == "completed"
+    assert scan_status["started_at"] is not None
+    assert scan_status["completed_at"] is not None
     assert scan_status["files_seen"] == 4
     assert scan_status["image_files_matched"] == 3
     assert scan_status["new_files"] == 3
     assert scan_status["updated_files"] == 0
-    assert scan_status["skipped_files"] == 1
+    assert scan_status["skipped_files"] == 0
     assert scan_status["failed_files"] == 0
     assert scan_status["elapsed_seconds"] >= 0
     assert scan_status["last_error"] is None
@@ -174,8 +176,87 @@ def test_scan_folder_starts_background_job_and_status_completes(tmp_path: Path) 
     assert second_scan_status["image_files_matched"] == 3
     assert second_scan_status["new_files"] == 0
     assert second_scan_status["updated_files"] == 0
-    assert second_scan_status["skipped_files"] == 4
+    assert second_scan_status["skipped_files"] == 3
     assert second_scan_status["failed_files"] == 0
+
+
+def test_scan_folder_counts_mixed_jpg_raf_files_without_non_image_skips(
+    tmp_path: Path,
+) -> None:
+    nested_folder = tmp_path / "nested"
+    nested_folder.mkdir()
+
+    image_files = [
+        *(tmp_path / f"photo-{index}.JPG" for index in range(4)),
+        *(nested_folder / f"raw-{index}.RAF" for index in range(5)),
+    ]
+    non_image_files = [
+        tmp_path / "archive.zip",
+        nested_folder / "notes.txt",
+    ]
+
+    for image_file in image_files:
+        image_file.write_text("image bytes")
+
+    for non_image_file in non_image_files:
+        non_image_file.write_text("not indexed as an image")
+
+    first_response = client.post("/scan-folder", params={"folder_path": str(tmp_path)})
+    first_status = wait_for_scan(first_response.json()["scan_id"])
+
+    assert first_response.status_code == 200
+    assert first_status["files_seen"] == len(image_files) + len(non_image_files)
+    assert first_status["image_files_matched"] == len(image_files)
+    assert first_status["new_files"] == len(image_files)
+    assert first_status["updated_files"] == 0
+    assert first_status["skipped_files"] == 0
+    assert first_status["failed_files"] == 0
+
+    second_response = client.post("/scan-folder", params={"folder_path": str(tmp_path)})
+    second_status = wait_for_scan(second_response.json()["scan_id"])
+
+    assert second_response.status_code == 200
+    assert second_status["files_seen"] == len(image_files) + len(non_image_files)
+    assert second_status["image_files_matched"] == len(image_files)
+    assert second_status["new_files"] == 0
+    assert second_status["updated_files"] == 0
+    assert second_status["skipped_files"] == len(image_files)
+    assert second_status["failed_files"] == 0
+
+
+def test_startup_cleanup_marks_stale_running_sessions_interrupted(tmp_path: Path) -> None:
+    started_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    with SessionLocal() as session:
+        scan_session = ScanSession(
+            folder_path=str(tmp_path),
+            status="running",
+            started_at=started_at,
+            completed_at=None,
+            files_seen=12,
+            image_files_matched=10,
+            new_files=8,
+            updated_files=0,
+            skipped_files=2,
+            failed_files=0,
+            last_error=None,
+        )
+        session.add(scan_session)
+        session.commit()
+        scan_id = scan_session.id
+
+    interrupted_count = main_module.mark_stale_running_scan_sessions_interrupted()
+
+    assert interrupted_count >= 1
+
+    response = client.get(f"/scan-sessions/{scan_id}")
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["status"] == "interrupted"
+    assert data["completed_at"] is not None
+    assert data["elapsed_seconds"] >= 0
+    assert data["last_error"] == main_module.RESTART_INTERRUPTED_SCAN_ERROR
 
 
 def test_scan_sessions_history_response_and_limit_behavior(tmp_path: Path) -> None:

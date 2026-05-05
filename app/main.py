@@ -27,7 +27,9 @@ IMAGE_EXTENSIONS = {
     ".raf",
 }
 BATCH_COMMIT_SIZE = 500
+PROGRESS_COMMIT_FILE_INTERVAL = 500
 RESUMABLE_SCAN_STATUSES = {"running", "interrupted", "failed"}
+RESTART_INTERRUPTED_SCAN_ERROR = "Scan interrupted because the application restarted."
 CANCELLED_SCAN_IDS: set[int] = set()
 CANCELLED_SCAN_IDS_LOCK = Lock()
 APP_VERSION = "0.8.0"
@@ -107,6 +109,36 @@ def ensure_scan_session_columns() -> None:
 
 ensure_photo_exif_columns()
 ensure_scan_session_columns()
+
+
+def mark_stale_running_scan_sessions_interrupted() -> int:
+    interrupted_at = datetime.now(timezone.utc)
+
+    with SessionLocal() as session:
+        running_sessions = (
+            session.query(ScanSession)
+            .filter(ScanSession.status == "running")
+            .all()
+        )
+
+        for scan_session in running_sessions:
+            scan_session.status = "interrupted"
+            scan_session.completed_at = interrupted_at
+            scan_session.last_error = RESTART_INTERRUPTED_SCAN_ERROR
+
+        session.commit()
+        interrupted_count = len(running_sessions)
+
+    if interrupted_count:
+        print(
+            f"Marked {interrupted_count} stale running scan session(s) interrupted.",
+            flush=True,
+        )
+
+    return interrupted_count
+
+
+mark_stale_running_scan_sessions_interrupted()
 
 
 @app.get("/health")
@@ -644,6 +676,12 @@ def format_scan_status(scan_session: ScanSession) -> dict[str, object]:
         "scan_id": scan_session.id,
         "status": scan_session.status,
         "folder_path": scan_session.folder_path,
+        "started_at": scan_session.started_at.isoformat(),
+        "completed_at": (
+            scan_session.completed_at.isoformat()
+            if scan_session.completed_at
+            else None
+        ),
         "files_seen": scan_session.files_seen,
         "image_files_matched": scan_session.image_files_matched,
         "new_files": scan_session.new_files,
@@ -786,6 +824,28 @@ def print_scan_counters(
     )
 
 
+def print_scan_diagnostics(
+    label: str,
+    *,
+    folder_path: Path,
+    resolved_folder_path: Path | None,
+    directory_entries_inspected: int,
+    supported_extension_files_found: int,
+    resume_skipped_files: int,
+) -> None:
+    resolved_label = str(resolved_folder_path) if resolved_folder_path else "unavailable"
+    print(
+        (
+            f"{label}: folder_path={folder_path}, "
+            f"resolved_folder_path={resolved_label}, "
+            f"directory_entries_inspected={directory_entries_inspected}, "
+            f"supported_extension_files_found={supported_extension_files_found}, "
+            f"resume_skipped_files={resume_skipped_files}"
+        ),
+        flush=True,
+    )
+
+
 def apply_scan_counters(
     scan_session: ScanSession,
     *,
@@ -802,6 +862,38 @@ def apply_scan_counters(
     scan_session.updated_files = updated_files
     scan_session.skipped_files = skipped_files
     scan_session.failed_files = failed_files
+
+
+def commit_scan_progress(
+    session,
+    scan_session: ScanSession,
+    *,
+    files_seen: int,
+    image_files_matched: int,
+    new_files: int,
+    updated_files: int,
+    skipped_files: int,
+    failed_files: int,
+) -> None:
+    apply_scan_counters(
+        scan_session,
+        files_seen=files_seen,
+        image_files_matched=image_files_matched,
+        new_files=new_files,
+        updated_files=updated_files,
+        skipped_files=skipped_files,
+        failed_files=failed_files,
+    )
+    session.commit()
+    print_scan_counters(
+        "Scan progress",
+        files_seen=files_seen,
+        image_files_matched=image_files_matched,
+        new_files=new_files,
+        updated_files=updated_files,
+        skipped_files=skipped_files,
+        failed_files=failed_files,
+    )
 
 
 def reset_scan_session_progress(scan_session: ScanSession) -> None:
@@ -898,6 +990,8 @@ def run_scan_job(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
     updated_files = 0
     skipped_files = 0
     failed_files = 0
+    directory_entries_inspected = 0
+    resume_skipped_files = 0
     cancelled = False
 
     with SessionLocal() as session:
@@ -909,6 +1003,10 @@ def run_scan_job(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
             return
 
         folder = Path(scan_session.folder_path)
+        try:
+            resolved_folder = folder.resolve(strict=True)
+        except OSError:
+            resolved_folder = None
         processed_paths = set()
 
         if resumed:
@@ -919,10 +1017,19 @@ def run_scan_job(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
                 .all()
             }
 
-        print(f"Scan started: {folder}", flush=True)
+        print_scan_diagnostics(
+            "Scan started",
+            folder_path=folder,
+            resolved_folder_path=resolved_folder,
+            directory_entries_inspected=directory_entries_inspected,
+            supported_extension_files_found=image_files_matched,
+            resume_skipped_files=resume_skipped_files,
+        )
 
         try:
             for path in folder.rglob("*"):
+                directory_entries_inspected += 1
+
                 if is_scan_cancelled(scan_id):
                     cancelled = True
                     break
@@ -934,9 +1041,19 @@ def run_scan_job(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
                 files_seen += 1
 
                 if path.suffix.lower() not in IMAGE_EXTENSIONS:
-                    skipped_files += 1
-
                     if resumed and path_string in processed_paths:
+                        resume_skipped_files += 1
+                        if files_seen % PROGRESS_COMMIT_FILE_INTERVAL == 0:
+                            commit_scan_progress(
+                                session,
+                                scan_session,
+                                files_seen=files_seen,
+                                image_files_matched=image_files_matched,
+                                new_files=new_files,
+                                updated_files=updated_files,
+                                skipped_files=skipped_files,
+                                failed_files=failed_files,
+                            )
                         continue
 
                     session.add(
@@ -945,12 +1062,35 @@ def run_scan_job(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
                             path=path_string,
                         )
                     )
+                    if files_seen % PROGRESS_COMMIT_FILE_INTERVAL == 0:
+                        commit_scan_progress(
+                            session,
+                            scan_session,
+                            files_seen=files_seen,
+                            image_files_matched=image_files_matched,
+                            new_files=new_files,
+                            updated_files=updated_files,
+                            skipped_files=skipped_files,
+                            failed_files=failed_files,
+                        )
                     continue
 
                 image_files_matched += 1
 
                 if resumed and path_string in processed_paths:
                     skipped_files += 1
+                    resume_skipped_files += 1
+                    if files_seen % PROGRESS_COMMIT_FILE_INTERVAL == 0:
+                        commit_scan_progress(
+                            session,
+                            scan_session,
+                            files_seen=files_seen,
+                            image_files_matched=image_files_matched,
+                            new_files=new_files,
+                            updated_files=updated_files,
+                            skipped_files=skipped_files,
+                            failed_files=failed_files,
+                        )
                     continue
 
                 try:
@@ -1013,19 +1153,15 @@ def run_scan_job(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
                     )
                 )
 
-                if image_files_matched % BATCH_COMMIT_SIZE == 0:
-                    apply_scan_counters(
+                should_commit_progress = (
+                    image_files_matched > 0
+                    and image_files_matched % BATCH_COMMIT_SIZE == 0
+                ) or files_seen % PROGRESS_COMMIT_FILE_INTERVAL == 0
+
+                if should_commit_progress:
+                    commit_scan_progress(
+                        session,
                         scan_session,
-                        files_seen=files_seen,
-                        image_files_matched=image_files_matched,
-                        new_files=new_files,
-                        updated_files=updated_files,
-                        skipped_files=skipped_files,
-                        failed_files=failed_files,
-                    )
-                    session.commit()
-                    print_scan_counters(
-                        "Scan progress",
                         files_seen=files_seen,
                         image_files_matched=image_files_matched,
                         new_files=new_files,
@@ -1049,6 +1185,14 @@ def run_scan_job(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
             scan_session.last_error = str(error)
             session.commit()
             print(f"Scan failed: {error}", flush=True)
+            print_scan_diagnostics(
+                "Scan failed diagnostics",
+                folder_path=folder,
+                resolved_folder_path=resolved_folder,
+                directory_entries_inspected=directory_entries_inspected,
+                supported_extension_files_found=image_files_matched,
+                resume_skipped_files=resume_skipped_files,
+            )
             clear_scan_cancellation(scan_id)
             return
 
@@ -1080,6 +1224,14 @@ def run_scan_job(scan_id: int, *, resumed: bool, force_metadata: bool) -> None:
         updated_files=updated_files,
         skipped_files=skipped_files,
         failed_files=failed_files,
+    )
+    print_scan_diagnostics(
+        "Scan cancelled diagnostics" if cancelled else "Scan complete diagnostics",
+        folder_path=folder,
+        resolved_folder_path=resolved_folder,
+        directory_entries_inspected=directory_entries_inspected,
+        supported_extension_files_found=image_files_matched,
+        resume_skipped_files=resume_skipped_files,
     )
     print(
         f"Elapsed time: {elapsed_time:.2f} seconds",
@@ -1114,10 +1266,12 @@ def scan_folder(
             detail=f"Folder not found: {folder_path}",
         )
 
+    resolved_folder = folder.resolve()
+
     with SessionLocal() as session:
         scan_id, resumed, already_running = get_or_create_scan_session(
             session,
-            folder_path=str(folder),
+            folder_path=str(resolved_folder),
             resume=resume,
             force_metadata=force_metadata,
         )
@@ -1127,7 +1281,7 @@ def scan_folder(
             return {
                 "scan_id": scan_id,
                 "status": "running",
-                "folder_path": str(folder),
+                "folder_path": str(resolved_folder),
                 "force_metadata": force_metadata,
                 "exiftool_available": is_exiftool_available(),
                 "message": "A scan is already running for this folder.",
@@ -1143,7 +1297,7 @@ def scan_folder(
     return {
         "scan_id": scan_id,
         "status": "running",
-        "folder_path": str(folder),
+        "folder_path": str(resolved_folder),
         "force_metadata": force_metadata,
         "exiftool_available": is_exiftool_available(),
     }
@@ -1182,7 +1336,7 @@ def list_scan_sessions(
         query = session.query(ScanSession)
 
         if folder_path:
-            folder = str(Path(folder_path).expanduser())
+            folder = str(Path(folder_path).expanduser().resolve())
             query = query.filter(ScanSession.folder_path == folder)
 
         scan_sessions = (

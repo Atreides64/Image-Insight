@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import {
   Bar,
   BarChart,
@@ -122,6 +122,8 @@ type ScanStatus = {
   scan_id: number;
   folder_path: string;
   status: string;
+  started_at: string;
+  completed_at: string | null;
   files_seen: number;
   image_files_matched: number;
   new_files: number;
@@ -174,10 +176,13 @@ function formatDate(value: string | null): string {
     return "No data yet";
   }
 
+  const timestampHasTimezone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const date = new Date(timestampHasTimezone ? value : `${value}Z`);
+
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function formatCalendarDate(value: string | null): string {
@@ -354,20 +359,110 @@ function formatScanSpeed(value: number | null | undefined): string {
 }
 
 function formatScanSummary(status: ScanStatus): string {
-  const summary = `${status.image_files_matched.toLocaleString()} matched, ${status.new_files.toLocaleString()} new, ${status.updated_files.toLocaleString()} updated, ${status.skipped_files.toLocaleString()} skipped, ${status.failed_files.toLocaleString()} failed at ${formatScanSpeed(status.scan_speed_files_per_second)}.`;
-
   switch (status.status) {
     case "completed":
-      return `Scan complete for ${status.folder_path}. ${summary}`;
+      return `Scan complete for ${status.folder_path}.`;
     case "cancelled":
-      return `Scan cancelled for ${status.folder_path}. ${summary}`;
+      return `Scan cancelled for ${status.folder_path}.`;
     case "failed":
-      return `Scan failed for ${status.folder_path}. ${status.last_error ?? summary}`;
+      return `Scan failed for ${status.folder_path}. ${
+        status.last_error ?? "Review Scan History for details."
+      }`;
     case "interrupted":
-      return `Scan interrupted for ${status.folder_path}. ${status.last_error ?? summary}`;
+      return `Scan interrupted for ${status.folder_path}. ${
+        status.last_error ?? "Review Scan History for details."
+      }`;
     default:
-      return `Scan stopped for ${status.folder_path}. ${summary}`;
+      return `Scan stopped for ${status.folder_path}.`;
   }
+}
+
+function InfoTip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="info-tip">
+      <button type="button" aria-label={label}>
+        i
+      </button>
+      <span role="tooltip">{children}</span>
+    </span>
+  );
+}
+
+function ScanLibraryInfoTip() {
+  return (
+    <InfoTip label="Scan Library terminology">
+      <ul>
+        <li>Files seen: files inspected.</li>
+        <li>Matched: supported image files.</li>
+        <li>New: newly indexed images.</li>
+        <li>Updated: changed image metadata.</li>
+        <li>Skipped: unchanged matched images.</li>
+        <li>Failed: files that could not be processed.</li>
+        <li>Speed: current files/sec rate.</li>
+        <li>Refresh metadata: re-read EXIF for indexed files.</li>
+        <li>Network drives may scan slower.</li>
+        <li>ZIP/archive files are not scanned inside yet.</li>
+      </ul>
+    </InfoTip>
+  );
+}
+
+function ScanLibraryIcon() {
+  return (
+    <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+      <path
+        d="M12 7h12l6 6v20H12z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M24 7v7h6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 23h24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <path
+        d="M14 28h12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        opacity="0.65"
+      />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+      <circle
+        cx="18"
+        cy="18"
+        r="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+      />
+      <path
+        d="M25 25l7 7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 function App() {
@@ -387,7 +482,6 @@ function App() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [lastScanSession, setLastScanSession] = useState<ScanSession | null>(null);
   const [scanHistory, setScanHistory] = useState<ScanSession[]>([]);
-  const [isScanHistoryExpanded, setIsScanHistoryExpanded] = useState(false);
   const [activeScanId, setActiveScanId] = useState<number | null>(null);
   const [activeScanStatus, setActiveScanStatus] = useState<ScanStatus | null>(null);
   const [photoSearchFilters, setPhotoSearchFilters] = useState<PhotoSearchFilters>({
@@ -782,46 +876,6 @@ function App() {
     );
   }
 
-  function openShortcut(target: "scan" | "search" | "insights" | "settings") {
-    if (target === "scan" || target === "search") {
-      setActiveTool(target);
-      setIsSettingsOpen(false);
-      window.setTimeout(
-        () =>
-          document
-            .getElementById(
-              `${target === "scan" ? "scan-library" : "photo-search"}-panel`,
-            )
-            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
-        0,
-      );
-      return;
-    }
-
-    if (target === "settings") {
-      setIsSettingsOpen(true);
-      setActiveTool(null);
-      window.setTimeout(
-        () =>
-          document
-            .getElementById("dashboard-settings")
-            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
-        0,
-      );
-      return;
-    }
-
-    setActiveTool(null);
-    setIsSettingsOpen(false);
-    window.setTimeout(
-      () =>
-        document
-          .getElementById("insights-section")
-          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
-      0,
-    );
-  }
-
   const fileTypeRows = useMemo(() => {
     if (!stats) {
       return [];
@@ -886,6 +940,38 @@ function App() {
   const canResumeScan = (scanSession: ScanSession) =>
     ["failed", "interrupted"].includes(scanSession.status);
   const latestScanHistoryItem = scanHistory[0] ?? null;
+  const activeScanMetrics = activeScanStatus
+    ? [
+        {
+          label: "Files seen",
+          value: activeScanStatus.files_seen.toLocaleString(),
+        },
+        {
+          label: "Matched",
+          value: activeScanStatus.image_files_matched.toLocaleString(),
+        },
+        {
+          label: "New",
+          value: activeScanStatus.new_files.toLocaleString(),
+        },
+        {
+          label: "Updated",
+          value: activeScanStatus.updated_files.toLocaleString(),
+        },
+        {
+          label: "Skipped",
+          value: activeScanStatus.skipped_files.toLocaleString(),
+        },
+        {
+          label: "Failed",
+          value: activeScanStatus.failed_files.toLocaleString(),
+        },
+        {
+          label: "Speed",
+          value: formatScanSpeed(activeScanStatus.scan_speed_files_per_second),
+        },
+      ]
+    : [];
 
   return (
     <main className={`app-shell${isCompactDashboard ? " compact-mode" : ""}`}>
@@ -905,21 +991,6 @@ function App() {
           {isSettingsOpen ? "Close Settings" : "Settings"}
         </button>
       </section>
-
-      <nav className="quick-tools" aria-label="Dashboard shortcuts">
-        <button type="button" onClick={() => openShortcut("scan")}>
-          Scan Library
-        </button>
-        <button type="button" onClick={() => openShortcut("search")}>
-          Metadata Search
-        </button>
-        <button type="button" onClick={() => openShortcut("insights")}>
-          Insights
-        </button>
-        <button type="button" onClick={() => openShortcut("settings")}>
-          Settings
-        </button>
-      </nav>
 
       {isLoading && <p className="state-message">Loading dashboard...</p>}
 
@@ -1385,7 +1456,9 @@ function App() {
             aria-controls="scan-library-panel"
             aria-expanded={activeTool === "scan"}
           >
-            <span className="tool-card-icon" aria-hidden="true" />
+            <span className="tool-card-icon scan-icon" aria-hidden="true">
+              <ScanLibraryIcon />
+            </span>
             <span className="tool-card-copy">
               <strong>Scan Library</strong>
               <span>Run new scans, refresh metadata, and review scan history.</span>
@@ -1399,7 +1472,9 @@ function App() {
             aria-controls="photo-search-panel"
             aria-expanded={activeTool === "search"}
           >
-            <span className="tool-card-icon" aria-hidden="true" />
+            <span className="tool-card-icon search-icon" aria-hidden="true">
+              <SearchIcon />
+            </span>
             <span className="tool-card-copy">
               <strong>Metadata Search</strong>
               <span>Filter indexed photos by EXIF details.</span>
@@ -1421,37 +1496,71 @@ function App() {
         <div className="section-heading scan-heading">
           <div>
             <h2 id="scan-library-heading">Scan Library</h2>
-            <span>Start a scan or review recent scan activity</span>
+            <span>Index a local photo folder and review recent scan activity</span>
           </div>
         </div>
 
         <div className="scan-subsection">
-          <h3>New Scan</h3>
-        <form className="scan-form" onSubmit={handleScanSubmit}>
-          <label htmlFor="folder-path">Local folder path</label>
-          <div className="scan-controls">
-            <input
-              id="folder-path"
-              type="text"
-              value={folderPath}
-              onChange={(event) => setFolderPath(event.target.value)}
-              placeholder="/Users/you/Pictures"
-              disabled={isScanning}
-            />
-            <button type="submit" disabled={isScanning}>
-              {isScanning ? "Scanning..." : "Scan"}
-            </button>
+          <div className="scan-subsection-heading">
+            <h3>New Scan</h3>
+            <ScanLibraryInfoTip />
           </div>
-          <label className="scan-option">
-            <input
-              type="checkbox"
-              checked={refreshMetadata}
-              onChange={(event) => setRefreshMetadata(event.target.checked)}
-              disabled={isScanning}
-            />
-            Refresh metadata
-          </label>
-        </form>
+          <form className="scan-form" onSubmit={handleScanSubmit}>
+            <label htmlFor="folder-path">Local folder path</label>
+            <div className="scan-controls">
+              <input
+                id="folder-path"
+                type="text"
+                value={folderPath}
+                onChange={(event) => setFolderPath(event.target.value)}
+                placeholder="/Users/you/Pictures"
+                disabled={isScanning}
+              />
+              <button
+                type={isScanning ? "button" : "submit"}
+                className={
+                  isScanning ? "scan-primary-button cancel" : "scan-primary-button"
+                }
+                onClick={isScanning ? () => void cancelActiveScan() : undefined}
+                disabled={isScanning && activeScanId === null}
+              >
+                {isScanning ? "Cancel Scan" : "Start Scan"}
+              </button>
+            </div>
+            {isScanning && (
+              <div
+                className="active-scan-near-input"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="spinner" aria-hidden="true" />
+                <div>
+                  <strong>Running scan</strong>
+                  <span>{activeScanStatus?.folder_path ?? folderPath}</span>
+                  <small>
+                    Started{" "}
+                    {formatDate(
+                      activeScanStatus?.started_at ??
+                        lastScanSession?.started_at ??
+                        null,
+                    )}
+                  </small>
+                </div>
+              </div>
+            )}
+            <label className="scan-option">
+              <input
+                type="checkbox"
+                checked={refreshMetadata}
+                onChange={(event) => setRefreshMetadata(event.target.checked)}
+                disabled={isScanning}
+              />
+              <span>
+                Refresh metadata
+                <small>Re-read EXIF details for files already indexed.</small>
+              </span>
+            </label>
+          </form>
         </div>
 
         {pendingRescanPath && (
@@ -1501,58 +1610,11 @@ function App() {
           </div>
         )}
 
-        {lastScanSession && (
-          <div className="scan-history">
-            <div className="scan-history-header">
-              <strong>Previous Scan Status</strong>
-              <span className={`scan-status ${lastScanSession.status}`}>
-                {formatScanStatus(lastScanSession.status)}
-              </span>
-            </div>
-            <p className="scan-history-meta">
-              Started {formatDate(lastScanSession.started_at)}. Files seen:{" "}
-              {lastScanSession.files_seen.toLocaleString()}, matched:{" "}
-              {lastScanSession.image_files_matched.toLocaleString()}, new:{" "}
-              {lastScanSession.new_files.toLocaleString()}, updated:{" "}
-              {lastScanSession.updated_files.toLocaleString()}, skipped:{" "}
-              {lastScanSession.skipped_files.toLocaleString()}, failed:{" "}
-              {lastScanSession.failed_files.toLocaleString()}, speed:{" "}
-              {formatScanSpeed(lastScanSession.scan_speed_files_per_second)}.
-            </p>
-            {(lastScanSession.force_metadata ||
-              lastScanSession.exiftool_available) && (
-              <p className="scan-history-note">
-                {lastScanSession.exiftool_available
-                  ? "ExifTool enabled."
-                  : "ExifTool not detected."}{" "}
-                {lastScanSession.force_metadata
-                  ? "Metadata backfill was enabled."
-                  : ""}
-              </p>
-            )}
-            {lastScanSession.last_error && (
-              <p className="scan-history-note">
-                Last error: {lastScanSession.last_error}
-              </p>
-            )}
-            {canResumeLastScan && (
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void runScan({ resume: true })}
-                disabled={isScanning}
-              >
-                Resume Last Scan
-              </button>
-            )}
-          </div>
-        )}
-
         {isScanning && (
-          <div className="scan-progress" role="status" aria-live="polite">
+          <div className="scan-progress" aria-live="polite">
             <span className="spinner" aria-hidden="true" />
             <span>
-              Scan running in the background. Progress updates every few seconds.
+              Scanning with live counters. Total file count is not known up front.
             </span>
             <span className="scan-progress-detail">
               {(activeScanStatus?.exiftool_available ??
@@ -1563,49 +1625,17 @@ function App() {
             {(activeScanStatus?.force_metadata ?? refreshMetadata) && (
               <span className="scan-progress-detail">Metadata backfill enabled</span>
             )}
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => void cancelActiveScan()}
-              disabled={activeScanId === null}
-            >
-              Cancel Scan
-            </button>
           </div>
         )}
 
         {activeScanStatus && (
           <div className="scan-live-panel" aria-label="Live scan progress">
-            <div>
-              <span>Files Seen</span>
-              <strong>{activeScanStatus.files_seen.toLocaleString()}</strong>
-            </div>
-            <div>
-              <span>Matched</span>
-              <strong>{activeScanStatus.image_files_matched.toLocaleString()}</strong>
-            </div>
-            <div>
-              <span>New</span>
-              <strong>{activeScanStatus.new_files.toLocaleString()}</strong>
-            </div>
-            <div>
-              <span>Updated</span>
-              <strong>{activeScanStatus.updated_files.toLocaleString()}</strong>
-            </div>
-            <div>
-              <span>Skipped</span>
-              <strong>{activeScanStatus.skipped_files.toLocaleString()}</strong>
-            </div>
-            <div>
-              <span>Failed</span>
-              <strong>{activeScanStatus.failed_files.toLocaleString()}</strong>
-            </div>
-            <div>
-              <span>Speed</span>
-              <strong>
-                {formatScanSpeed(activeScanStatus.scan_speed_files_per_second)}
-              </strong>
-            </div>
+            {activeScanMetrics.map((metric) => (
+              <div key={metric.label}>
+                <span>{metric.label}</span>
+                <strong>{metric.value}</strong>
+              </div>
+            ))}
           </div>
         )}
 
@@ -1626,11 +1656,32 @@ function App() {
           >
             {isScanHistoryOpen ? "Hide Scan History" : "Show Scan History"}
           </button>
-          <span>{scanHistory.length.toLocaleString()} recent scans</span>
+          <span>
+            {scanHistory.length.toLocaleString()} recent scans
+            {latestScanHistoryItem && (
+              <>
+                . Latest: {formatScanStatus(latestScanHistoryItem.status)}{" "}
+                {formatDate(latestScanHistoryItem.started_at)}
+              </>
+            )}
+          </span>
         </div>
 
 {isScanHistoryOpen && (
   <section id="scan-history-panel" className="table-section embedded-history">
+    {canResumeLastScan && (
+      <div className="history-resume-banner">
+        <span>Last scan can be resumed from Scan History.</span>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => void runScan({ resume: true })}
+          disabled={isScanning}
+        >
+          Resume Last Scan
+        </button>
+      </div>
+    )}
     <table>
       <thead>
         <tr>
@@ -1638,6 +1689,7 @@ function App() {
           <th>Folder</th>
           <th>Matched</th>
           <th>Changes</th>
+          <th>Started</th>
           <th>Duration</th>
           <th>Completed</th>
           <th>Action</th>
@@ -1657,8 +1709,10 @@ function App() {
               <td>
                 {scanSession.new_files.toLocaleString()} new,{" "}
                 {scanSession.updated_files.toLocaleString()} updated,{" "}
+                {scanSession.skipped_files.toLocaleString()} skipped,{" "}
                 {scanSession.failed_files.toLocaleString()} failed
               </td>
+              <td>{formatDate(scanSession.started_at)}</td>
               <td>{scanSession.elapsed_seconds.toFixed(2)}s</td>
               <td>{formatDate(scanSession.completed_at)}</td>
               <td>
@@ -1698,7 +1752,7 @@ function App() {
           ))
         ) : (
           <tr>
-            <td colSpan={7}>
+            <td colSpan={8}>
               No scan history yet. Start with a local photo folder above.
             </td>
           </tr>

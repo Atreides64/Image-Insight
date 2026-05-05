@@ -89,18 +89,39 @@ exiftool -ver
 `scan_id` quickly. The scan continues in a Python thread and writes progress to
 the existing SQLite scan session record.
 
-Scans stream directly over `Path.rglob("*")`, commit database changes every 500
-matched image files, and treat unchanged existing rows as `skipped_files`
-instead of `updated_files`.
-
-Use `force_metadata=true` to refresh EXIF metadata for unchanged files. This is
-intended for backfilling older rows after metadata extraction improves; it only
-fills missing EXIF fields with newly extracted values and counts those rows as
+Scans stream directly over `Path.rglob("*")`, store a resolved folder path for
+the scan session, commit visible progress every 500 files seen or 500 matched
+image files, and treat unchanged existing rows as `skipped_files` instead of
 `updated_files`.
+
+Scan counters use these terms:
+
+- `files_seen`: all files inspected while walking the folder.
+- `image_files_matched`: files recognized as supported image types.
+- `new_files`: newly indexed images.
+- `updated_files`: existing images with changed file metadata or newly
+  backfilled EXIF metadata.
+- `skipped_files`: matched image files that were unchanged or already handled
+  while resuming a scan. ZIP/archive files are included in `files_seen` but are
+  not counted as skipped images and are not scanned inside yet.
+- `failed_files`: files that could not be read or processed.
+- `scan_speed_files_per_second`: current processing rate based on files seen and
+  elapsed scan time. Network drives may scan slower than local drives.
+
+Use `force_metadata=true` to refresh EXIF metadata for unchanged files. Normal
+scans skip unchanged files; refresh metadata re-checks EXIF for already indexed
+files. This is useful after enabling ExifTool or improving metadata extraction.
+It only fills missing EXIF fields with newly extracted values, counts those rows
+as `updated_files`, and may take longer, especially on network drives.
 
 Use `POST /scan-sessions/{scan_id}/cancel` to request cancellation for a running
 scan. Cancellation is tracked in memory, so the active scan loop stops early,
 commits the latest counters, and stores the terminal status as `cancelled`.
+
+If the backend restarts while a scan is marked `running`, startup cleanup marks
+that session `interrupted`, sets `completed_at`, and records
+`Scan interrupted because the application restarted.` in `last_error`. Interrupted
+sessions are terminal for elapsed-time display and can be resumed.
 
 Use `resume=true` to resume the latest failed or interrupted scan session for
 the same folder without redoing already committed file work unnecessarily.
@@ -136,6 +157,8 @@ curl "http://127.0.0.1:8000/scan-status/1"
 - `scan_id`
 - `status`
 - `folder_path`
+- `started_at`
+- `completed_at`
 - `files_seen`
 - `image_files_matched`
 - `new_files`
@@ -234,12 +257,13 @@ To point it somewhere else, create `frontend/.env.local`:
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-The dashboard is organized around a branded header, quick shortcuts, an
-Insights section, and focused tool cards. Scan Library combines new scans,
-metadata refreshes, cancellation, resume/rerun actions, and collapsible scan
-history. Metadata Search stays as a separate tool. If a folder has already been
-scanned, the dashboard asks the user to choose Refresh metadata, Scan anyway, or
-Cancel before starting another scan.
+The dashboard is organized around a branded header, top-level Scan Library and
+Metadata Search tool cards, and an Insights section. Scan Library combines new
+scans, metadata refreshes, cancellation, resume/rerun actions, collapsible scan
+history, and one concise info popover for scan terminology. Metadata Search
+stays as a separate tool. If a folder has already been scanned, the dashboard
+asks the user to choose Refresh metadata, Scan anyway, or Cancel before starting
+another scan.
 
 The local "Customize Dashboard" panel lives under Settings. Users can toggle
 individual cards, charts, search/history sections, and the file type table, and
