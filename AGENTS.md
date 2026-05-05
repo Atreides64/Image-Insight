@@ -35,8 +35,9 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 
 - The backend creates tables at startup with `Base.metadata.create_all(bind=engine)` for now.
 - The default SQLite database path is always the repo-root `image_insight.db`; tests override it with `IMAGE_INSIGHT_DATABASE_URL`.
-- `/photos/search` is a read-only SQLite query over the existing `photos` table with optional metadata filters and paginated `total_count`/`results` output.
+- `/photos/search` is a read-only SQLite query over the existing `photos` table with optional metadata filters for camera, lens, focal length, extension, ISO, aperture, shutter speed, capture date range, and device type plus paginated `total_count`/`results` output.
 - `/photos/search` defaults to `limit=50`, caps requested limits at 500, defaults `offset=0`, and validates date/focal-length/pagination ranges with clean 400 responses.
+- `/photos/search-options` returns capped distinct metadata values for search dropdowns/autocomplete.
 - Image metadata extraction uses optional ExifTool JSON output first when `exiftool` is available on PATH, then falls back to Pillow; ExifTool is not required for CI or local development.
 - `POST /scan-folder` starts a lightweight background scan thread and returns `scan_id` quickly.
 - `POST /scan-folder?force_metadata=true` refreshes EXIF extraction for unchanged files and only backfills missing EXIF fields with newly populated values.
@@ -51,7 +52,8 @@ Image Insight is a local-first media metadata analytics app for scanning photo f
 - Long scans commit visible progress every 500 files seen or 500 matched image files so polling does not appear stuck in folders with many non-image files.
 - Starting a duplicate running scan for the same folder returns a conflict unless `resume=true` is attaching to the existing running session.
 - The frontend fetches the backend from `VITE_API_BASE_URL`, defaulting to `http://127.0.0.1:8000`.
-- `/stats` includes a `photo_timeline` field with the dashboard's monthly date-taken insight series, photo counts, and top camera/lens labels for tooltips.
+- `/stats` includes default insight fields for average file size, storage by file type, average file size by file type, RAW/JPEG split, phone/camera/unknown counts, most common ISO/aperture/shutter speed, average file size by camera, camera/lens usage timelines, capture-date coverage, and a monthly date-taken `photo_timeline` with top camera/lens labels for tooltips. `photo_timeline` requires `date_taken` plus at least one credible capture metadata field.
+- Camera type classification is derived from make/model text only (`phone`, `camera`, `unknown`) and does not overwrite stored EXIF camera fields.
 - CORS is enabled for the Vite dev server on `localhost:5173` and `127.0.0.1:5173`.
 - Tests set `IMAGE_INSIGHT_DATABASE_URL` before importing the app so they use a temporary SQLite database.
 - pytest uses repo-root imports via `pytest.ini` with `pythonpath = .`; CI also sets `PYTHONPATH=.` for the backend job.

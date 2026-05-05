@@ -405,15 +405,23 @@ h2 {
 }
 
 .scan-section {
+  border-color: rgba(125, 211, 252, 0.42);
   border-radius: 8px;
   margin-bottom: 18px;
   overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(125, 211, 252, 0.12), rgba(14, 165, 233, 0.06)),
+    #111b29;
 }
 
 .search-section {
+  border-color: rgba(169, 135, 255, 0.42);
   border-radius: 8px;
   margin-bottom: 18px;
   overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(169, 135, 255, 0.14), rgba(244, 114, 182, 0.06)),
+    #141829;
 }
 
 .system-info-panel {
@@ -472,7 +480,7 @@ h2 {
 .scan-form {
   display: grid;
   gap: 10px;
-  padding: 22px;
+  padding: 16px 0 8px;
 }
 
 .scan-subsection {
@@ -501,7 +509,7 @@ h2 {
 .rescan-warning {
   display: grid;
   gap: 10px;
-  margin: 0 22px 22px;
+  margin: 0 22px 16px;
   border: 1px solid rgba(169, 135, 255, 0.42);
   border-radius: 8px;
   padding: 14px;
@@ -588,7 +596,8 @@ h2 {
 }
 
 .scan-controls input,
-.search-form input {
+.search-form input,
+.search-form select {
   min-width: 0;
   border: 1px solid #314055;
   border-radius: 8px;
@@ -599,13 +608,15 @@ h2 {
 }
 
 .scan-controls input:focus,
-.search-form input:focus {
+.search-form input:focus,
+.search-form select:focus {
   border-color: #7dd3fc;
   box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.16);
 }
 
 .scan-controls input:disabled,
-.search-form input:disabled {
+.search-form input:disabled,
+.search-form select:disabled {
   color: #7f8da1;
 }
 
@@ -705,7 +716,7 @@ h2 {
 }
 
 .scan-feedback {
-  margin: 0 22px 22px;
+  margin: 0 22px 16px;
   border-radius: 8px;
   padding: 12px 14px;
 }
@@ -715,7 +726,7 @@ h2 {
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
-  margin: 0 22px 22px;
+  margin: 0 22px 16px;
   border-radius: 8px;
   padding: 12px 14px;
   color: #d9edff;
@@ -734,7 +745,7 @@ h2 {
   display: grid;
   grid-template-columns: repeat(7, minmax(112px, 1fr));
   gap: 8px;
-  margin: 0 22px 22px;
+  margin: 0 22px 16px;
 }
 
 .scan-live-panel div {
@@ -824,7 +835,7 @@ h2 {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
-  margin: 0 22px 22px;
+  margin: 0 22px 16px;
   border-top: 1px solid #273244;
   padding-top: 16px;
   color: #a7b3c6;
@@ -978,14 +989,63 @@ h2 {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
 }
 
 .stat-card {
-  min-height: 106px;
+  min-height: 94px;
+  border-color: rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  padding: 16px;
+  padding: 14px;
+  background:
+    linear-gradient(135deg, rgba(125, 211, 252, 0.18), rgba(14, 165, 233, 0.05)),
+    #101823;
+}
+
+.stat-card:nth-child(2n) {
+  background:
+    linear-gradient(135deg, rgba(169, 135, 255, 0.18), rgba(244, 114, 182, 0.05)),
+    #101823;
+}
+
+.stat-card:nth-child(3n) {
+  background:
+    linear-gradient(135deg, rgba(74, 222, 128, 0.16), rgba(45, 212, 191, 0.05)),
+    #101823;
+}
+
+.stat-card:nth-child(4n) {
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.16), rgba(249, 115, 22, 0.05)),
+    #101823;
+}
+
+.insight-default-card {
+  min-height: 88px;
+  padding: 13px;
+}
+
+.insight-default-card strong {
+  font-size: clamp(1rem, 1.8vw, 1.24rem);
+}
+
+.file-insight-card {
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(34, 211, 238, 0.06)),
+    #101823;
+}
+
+.camera-insight-card {
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(99, 102, 241, 0.06)),
+    #101823;
+}
+
+.exposure-insight-card {
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(249, 115, 22, 0.06)),
+    #101823;
 }
 
 .stat-card span {
@@ -1030,15 +1090,21 @@ h2 {
 
 .chart-section,
 .table-section {
-  margin-top: 18px;
   border-radius: 8px;
   overflow: hidden;
 }
 
-.chart-grid {
+.insights-section {
+  border-color: rgba(125, 211, 252, 0.28);
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(169, 135, 255, 0.09) 42%, rgba(74, 222, 128, 0.05)),
+    #111824;
+}
+
+.insight-module-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  gap: 14px;
 }
 
 .section-heading {
@@ -1046,8 +1112,8 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 22px;
-  border-bottom: 1px solid #273244;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .section-heading span {
@@ -1056,12 +1122,57 @@ h2 {
 }
 
 .chart-frame {
-  height: 320px;
-  padding: 22px;
+  height: 300px;
+  padding: 16px 14px 10px;
 }
 
 .compact-chart {
-  height: 280px;
+  height: 230px;
+}
+
+.chart-section,
+.table-section {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #101823;
+}
+
+.camera-module {
+  background:
+    linear-gradient(135deg, rgba(74, 222, 128, 0.18), rgba(20, 184, 166, 0.05)),
+    #101823;
+}
+
+.lens-module {
+  background:
+    linear-gradient(135deg, rgba(169, 135, 255, 0.2), rgba(99, 102, 241, 0.06)),
+    #101823;
+}
+
+.timeline-module {
+  background:
+    linear-gradient(135deg, rgba(244, 114, 182, 0.18), rgba(251, 191, 36, 0.05)),
+    #101823;
+}
+
+.file-type-module {
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(249, 115, 22, 0.06)),
+    #101823;
+}
+
+.file-count-module {
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.16), rgba(96, 165, 250, 0.05)),
+    #101823;
+}
+
+.compact-module .section-heading {
+  padding: 12px 14px;
+}
+
+.compact-module th,
+.compact-module td {
+  padding: 11px 14px;
 }
 
 .empty-chart {
@@ -1252,7 +1363,7 @@ td:first-child {
   font-size: 0.78rem;
 }
 
-.compact-mode .chart-grid {
+.compact-mode .insight-module-grid {
   gap: 12px;
 }
 
@@ -1307,7 +1418,7 @@ td:first-child {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .chart-grid {
+  .insight-module-grid {
     grid-template-columns: 1fr;
   }
 

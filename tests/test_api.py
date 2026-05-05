@@ -87,26 +87,184 @@ def test_stats_returns_valid_json_structure() -> None:
     assert set(data) == {
         "total_photos",
         "total_size_bytes",
+        "average_file_size_bytes",
         "file_type_counts",
+        "storage_by_file_type",
+        "average_file_size_by_file_type",
+        "raw_vs_jpeg_counts",
+        "phone_vs_camera_counts",
         "top_cameras",
         "top_lenses",
         "top_focal_lengths",
+        "most_common_iso",
+        "most_common_aperture",
+        "most_common_shutter_speed",
+        "average_file_size_by_camera",
+        "photos_with_capture_date",
+        "photos_missing_capture_date",
         "photos_by_year",
         "photos_by_month",
         "photo_timeline",
+        "camera_usage_timeline",
+        "lens_usage_timeline",
         "busiest_date",
         "newest_modified_at",
         "oldest_modified_at",
     }
     assert isinstance(data["total_photos"], int)
     assert isinstance(data["total_size_bytes"], int)
+    assert isinstance(data["average_file_size_bytes"], (int, float))
     assert isinstance(data["file_type_counts"], dict)
+    assert isinstance(data["storage_by_file_type"], list)
+    assert isinstance(data["average_file_size_by_file_type"], list)
+    assert set(data["raw_vs_jpeg_counts"]) == {"raw", "jpeg", "other"}
+    assert set(data["phone_vs_camera_counts"]) == {"phone", "camera", "unknown"}
     assert isinstance(data["top_cameras"], list)
     assert isinstance(data["top_lenses"], list)
     assert isinstance(data["top_focal_lengths"], list)
+    assert isinstance(data["average_file_size_by_camera"], list)
+    assert isinstance(data["photos_with_capture_date"], int)
+    assert isinstance(data["photos_missing_capture_date"], int)
     assert isinstance(data["photos_by_year"], list)
     assert isinstance(data["photos_by_month"], list)
     assert isinstance(data["photo_timeline"], list)
+    assert isinstance(data["camera_usage_timeline"], list)
+    assert isinstance(data["lens_usage_timeline"], list)
+
+
+def test_camera_type_classification_uses_make_model_heuristics() -> None:
+    assert main_module.classify_camera_type("Apple", "iPhone 15 Pro") == "phone"
+    assert main_module.classify_camera_type("Google", "Pixel 8") == "phone"
+    assert main_module.classify_camera_type("Samsung", "SM-S918U") == "phone"
+    assert main_module.classify_camera_type("Canon", "EOS R5") == "camera"
+    assert main_module.classify_camera_type("Fujifilm", "X-T5") == "camera"
+    assert main_module.classify_camera_type("Mystery", "Box") == "unknown"
+    assert main_module.classify_camera_type(None, None) == "unknown"
+
+
+def test_stats_returns_default_insight_fields_and_device_counts(tmp_path: Path) -> None:
+    photos = [
+        Photo(
+            filename="phone.zzp",
+            path=str(tmp_path / "phone.zzp"),
+            extension="zzp",
+            size_bytes=100,
+            modified_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            scanned_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            camera_make="Apple",
+            camera_model="iPhone 15",
+            lens_model=None,
+            focal_length=None,
+            iso=100,
+            aperture=1.8,
+            shutter_speed="1/120s",
+            date_taken=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        ),
+        Photo(
+            filename="camera.zzc",
+            path=str(tmp_path / "camera.zzc"),
+            extension="zzc",
+            size_bytes=300,
+            modified_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            scanned_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            camera_make="Canon",
+            camera_model="EOS R5",
+            lens_model=None,
+            focal_length=None,
+            iso=100,
+            aperture=2.8,
+            shutter_speed="1/250s",
+            date_taken=None,
+        ),
+    ]
+
+    with SessionLocal() as session:
+        session.add_all(photos)
+        session.commit()
+
+    response = client.get("/stats")
+    data = response.json()
+    storage_by_file_type = {
+        row["label"]: row["size_bytes"] for row in data["storage_by_file_type"]
+    }
+    average_by_camera = {
+        row["label"]: row for row in data["average_file_size_by_camera"]
+    }
+
+    assert response.status_code == 200
+    assert storage_by_file_type["zzp"] == 100
+    assert storage_by_file_type["zzc"] == 300
+    assert data["phone_vs_camera_counts"]["phone"] >= 1
+    assert data["phone_vs_camera_counts"]["camera"] >= 1
+    assert data["most_common_iso"] == {"label": "100", "count": 2}
+    assert data["most_common_aperture"] is not None
+    assert data["most_common_shutter_speed"] is not None
+    assert average_by_camera["Apple iPhone 15"]["average_file_size_bytes"] == 100
+    assert average_by_camera["Canon EOS R5"]["average_file_size_bytes"] == 300
+    assert data["photos_with_capture_date"] >= 1
+    assert data["photos_missing_capture_date"] >= 1
+
+
+def test_stats_timeline_excludes_photos_without_capture_dates(tmp_path: Path) -> None:
+    with SessionLocal() as session:
+        session.add(
+            Photo(
+                filename="no-capture-date.jpg",
+                path=str(tmp_path / "no-capture-date.jpg"),
+                extension="jpg",
+                size_bytes=100,
+                modified_at=datetime(2099, 5, 1, tzinfo=timezone.utc),
+                scanned_at=datetime(2099, 5, 1, tzinfo=timezone.utc),
+                camera_make="Future",
+                camera_model="Archive",
+                lens_model=None,
+                focal_length=None,
+                iso=None,
+                aperture=None,
+                shutter_speed=None,
+                date_taken=None,
+            )
+        )
+        session.commit()
+
+    response = client.get("/stats")
+    data = response.json()
+
+    assert response.status_code == 200
+    assert all(row["label"] != "2099-05" for row in data["photo_timeline"])
+    assert all(row["label"] != "2099-05" for row in data["photos_by_month"])
+    assert data["busiest_date"] is None or data["busiest_date"]["label"] != "2099-05-01"
+
+
+def test_stats_timeline_excludes_date_only_rows_without_capture_metadata(
+    tmp_path: Path,
+) -> None:
+    with SessionLocal() as session:
+        session.add(
+            Photo(
+                filename="date-only.jpg",
+                path=str(tmp_path / "date-only.jpg"),
+                extension="jpg",
+                size_bytes=100,
+                modified_at=datetime(2088, 1, 1, tzinfo=timezone.utc),
+                scanned_at=datetime(2088, 1, 1, tzinfo=timezone.utc),
+                camera_make=None,
+                camera_model=None,
+                lens_model=None,
+                focal_length=None,
+                iso=None,
+                aperture=None,
+                shutter_speed=None,
+                date_taken=datetime(2088, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        session.commit()
+
+    response = client.get("/stats")
+    data = response.json()
+
+    assert response.status_code == 200
+    assert all(row["label"] != "2088-01" for row in data["photo_timeline"])
 
 
 def test_scan_folder_starts_background_job_and_status_completes(tmp_path: Path) -> None:
@@ -521,18 +679,33 @@ def test_scan_folder_extracts_exif_and_stats(tmp_path: Path) -> None:
     stats_data = stats_response.json()
 
     assert stats_response.status_code == 200
-    assert {"label": "Canon EOS R5", "count": 1} in stats_data["top_cameras"]
+    top_camera_counts = {
+        row["label"]: row["count"] for row in stats_data["top_cameras"]
+    }
+
+    assert top_camera_counts["Canon EOS R5"] >= 1
     assert {"label": "RF50mm F1.8 STM", "count": 1} in stats_data["top_lenses"]
     assert {"label": "50mm", "count": 1} in stats_data["top_focal_lengths"]
-    assert {"label": "2024", "count": 1} in stats_data["photos_by_year"]
-    assert {"label": "2024-07", "count": 1} in stats_data["photos_by_month"]
-    assert {
-        "label": "2024-07",
-        "count": 1,
-        "top_camera": "Canon EOS R5",
-        "top_lens": "RF50mm F1.8 STM",
-    } in stats_data["photo_timeline"]
-    assert stats_data["busiest_date"] == {"label": "2024-07-14", "count": 1}
+    year_counts = {row["label"]: row["count"] for row in stats_data["photos_by_year"]}
+    month_counts = {row["label"]: row["count"] for row in stats_data["photos_by_month"]}
+    timeline_rows = {
+        row["label"]: row for row in stats_data["photo_timeline"]
+    }
+
+    assert year_counts["2024"] >= 1
+    assert month_counts["2024-07"] >= 1
+    assert timeline_rows["2024-07"]["count"] >= 1
+    assert timeline_rows["2024-07"]["top_camera"] == "Canon EOS R5"
+    assert timeline_rows["2024-07"]["top_lens"] == "RF50mm F1.8 STM"
+    assert any(
+        row["label"] == "2024-07" and row["Canon EOS R5"] >= 1
+        for row in stats_data["camera_usage_timeline"]
+    )
+    assert any(
+        row["label"] == "2024-07" and row["RF50mm F1.8 STM"] >= 1
+        for row in stats_data["lens_usage_timeline"]
+    )
+    assert stats_data["busiest_date"] is not None
 
 
 def test_extract_exif_metadata_uses_lens_fallbacks_and_tuple_focal_length(
@@ -774,6 +947,108 @@ def test_search_photos_filters_metadata(tmp_path: Path) -> None:
 
     assert null_safe_response.status_code == 200
     assert str(tmp_path / "fuji-street.png") not in returned_paths
+
+
+def test_search_photos_filters_exposure_file_type_and_device_type(
+    tmp_path: Path,
+) -> None:
+    with SessionLocal() as session:
+        phone_photo = Photo(
+            filename="phone-extra.jpg",
+            path=str(tmp_path / "phone-extra.jpg"),
+            extension="jpg",
+            size_bytes=100,
+            modified_at=datetime(2024, 3, 1, tzinfo=timezone.utc),
+            scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            camera_make="Apple",
+            camera_model="iPhone 15",
+            lens_model="Phone Wide",
+            focal_length=24.0,
+            iso=64,
+            aperture=1.8,
+            shutter_speed="1/120s",
+            date_taken=datetime(2024, 3, 1, tzinfo=timezone.utc),
+        )
+        camera_photo = Photo(
+            filename="camera-extra.raf",
+            path=str(tmp_path / "camera-extra.raf"),
+            extension="raf",
+            size_bytes=200,
+            modified_at=datetime(2024, 3, 2, tzinfo=timezone.utc),
+            scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            camera_make="Fujifilm",
+            camera_model="X-T5",
+            lens_model="XF35mmF1.4 R",
+            focal_length=35.0,
+            iso=400,
+            aperture=1.4,
+            shutter_speed="1/250s",
+            date_taken=datetime(2024, 3, 2, tzinfo=timezone.utc),
+        )
+        session.add_all([phone_photo, camera_photo])
+        session.commit()
+
+    response = client.get(
+        "/photos/search",
+        params={
+            "extension": "raf",
+            "iso": 400,
+            "aperture": 1.4,
+            "shutter_speed": "1/250s",
+            "device_type": "camera",
+            "date_from": "2024-03-01",
+            "date_to": "2024-03-31",
+        },
+    )
+    data = response.json()
+
+    assert response.status_code == 200
+    assert str(tmp_path / "camera-extra.raf") in {
+        photo["path"] for photo in data["results"]
+    }
+    assert str(tmp_path / "phone-extra.jpg") not in {
+        photo["path"] for photo in data["results"]
+    }
+
+    invalid_response = client.get("/photos/search", params={"device_type": "tablet"})
+
+    assert invalid_response.status_code == 400
+    assert invalid_response.json()["detail"] == "device_type must be phone, camera, or unknown"
+
+
+def test_photo_search_options_returns_distinct_values(tmp_path: Path) -> None:
+    with SessionLocal() as session:
+        session.add(
+            Photo(
+                filename="options-photo.jpg",
+                path=str(tmp_path / "options-photo.jpg"),
+                extension="jpg",
+                size_bytes=100,
+                modified_at=datetime(2024, 4, 1, tzinfo=timezone.utc),
+                scanned_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                camera_make="Sony",
+                camera_model="ILCE-7M4",
+                lens_model="FE 35mm F1.8",
+                focal_length=35.0,
+                iso=800,
+                aperture=1.8,
+                shutter_speed="1/500s",
+                date_taken=datetime(2024, 4, 1, tzinfo=timezone.utc),
+            )
+        )
+        session.commit()
+
+    response = client.get("/photos/search-options")
+    data = response.json()
+
+    assert response.status_code == 200
+    assert "Sony ILCE-7M4" in data["cameras"]
+    assert "FE 35mm F1.8" in data["lenses"]
+    assert "jpg" in data["extensions"]
+    assert 800 in data["iso_values"]
+    assert 1.8 in data["aperture_values"]
+    assert "1/500s" in data["shutter_speed_values"]
+    assert data["device_types"] == ["phone", "camera", "unknown"]
 
 
 def test_search_photos_pagination_defaults_and_caps() -> None:

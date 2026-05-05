@@ -190,9 +190,20 @@ ExifTool detection.
 Stats are available from `GET /stats` and include:
 
 - Library totals and file type counts
+- Average file size, storage by file type, RAW/JPEG split, and capture-date
+  coverage
+- Average file size by file type for the compact file-type chart
 - Top cameras, lenses, and focal lengths
+- Most common ISO, aperture, and shutter speed
+- Average file size by camera
+- Phone/camera/unknown counts from simple camera make/model heuristics
 - Photos by year and month
 - Busiest capture date when EXIF dates are available
+
+Camera type classification is derived from make/model text without changing the
+stored camera fields. Apple/iPhone, Pixel/Google, Samsung/SM-, LG, and Nexus are
+classified as `phone`; Nikon, Canon, Fujifilm, Sony, Ricoh, Olympus, Panasonic,
+and Leica are classified as `camera`; everything else is `unknown`.
 
 Search indexed photo metadata with `GET /photos/search`. Filters are optional
 and can be combined:
@@ -201,9 +212,13 @@ and can be combined:
 - `lens_model`
 - `min_focal_length`
 - `max_focal_length`
+- `iso`
+- `aperture`
+- `shutter_speed`
 - `date_from`
 - `date_to`
 - `extension`
+- `device_type`
 - `limit`
 - `offset`
 
@@ -217,6 +232,10 @@ The response includes `total_count`, `limit`, `offset`, and `results` for
 simple pagination. Search defaults to `limit=50` and `offset=0`; requested
 limits above 500 are capped at 500, and negative pagination values return a
 clean `400` response.
+
+Metadata search options are available from `GET /photos/search-options`, which
+returns capped distinct camera, lens, extension, ISO, aperture, shutter speed,
+and device-type values for dropdowns/autocomplete.
 
 Then open:
 
@@ -258,21 +277,26 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 The dashboard is organized around a branded header, top-level Scan Library and
-Metadata Search tool cards, and an Insights section. Scan Library combines new
-scans, metadata refreshes, cancellation, resume/rerun actions, collapsible scan
-history, and one concise info popover for scan terminology. Metadata Search
-stays as a separate tool. If a folder has already been scanned, the dashboard
-asks the user to choose Refresh metadata, Scan anyway, or Cancel before starting
-another scan.
+Metadata Search tool cards, and a colorful Insights section. Insight modules use
+a compact responsive grid on desktop, with varied card gradients for charts,
+file-type summaries, and stat cards. Default charts include compact camera/lens
+usage timelines when dated metadata exists and average file size by type. Scan Library combines new scans, metadata
+refreshes, cancellation, resume/rerun actions, collapsible scan history, and one
+concise info popover for scan terminology. Metadata Search stays as a separate
+tool. If a folder has already been scanned, the dashboard asks the user to choose
+Refresh metadata, Scan anyway, or Cancel before starting another scan.
 
 The local "Customize Dashboard" panel lives under Settings. Users can toggle
-individual cards, charts, search/history sections, and the file type table, and
-those preferences are saved in browser `localStorage` on that device. The
-capture timeline is labeled "Capture Timeline where available" because imported
-or exported archives may carry added/export dates instead of true capture dates.
+individual cards, charts, and search/history sections, and those preferences are
+saved in browser `localStorage` on that device. The
+Capture Timeline only includes files with EXIF capture dates (`date_taken`) and
+at least one credible capture metadata value such as camera make/model, ISO,
+aperture, shutter speed, or focal length. Files without that supporting capture
+metadata are excluded instead of falling back to modified or directory dates.
 
 ## Status
 
-v1.0 polish focuses on a cleaner blue/cyan/violet dashboard, safer rescan
-choices, consolidated scan tooling, and clearer timeline labeling. Duplicates,
-maps, open-in-folder, previews, and external job services remain future work.
+v1.2 visual polish focuses on a more colorful, compact, insight-forward
+dashboard while preserving the existing scan, search, and customization
+behavior. Duplicates, maps, open-in-folder, previews, and external job services
+remain future work.

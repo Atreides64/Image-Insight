@@ -17,21 +17,50 @@ type CountRow = {
   count: number;
 };
 
+type SizeRow = {
+  label: string;
+  size_bytes: number;
+};
+
+type AverageFileSizeByCameraRow = {
+  label: string;
+  average_file_size_bytes: number;
+  count: number;
+};
+
 type TimelineInsightRow = CountRow & {
   top_camera: string | null;
   top_lens: string | null;
 };
 
+type UsageTimelineRow = {
+  label: string;
+  [series: string]: string | number;
+};
+
 type Stats = {
   total_photos: number;
   total_size_bytes: number;
+  average_file_size_bytes: number;
   file_type_counts: Record<string, number>;
+  storage_by_file_type: SizeRow[];
+  average_file_size_by_file_type: AverageFileSizeByCameraRow[];
+  raw_vs_jpeg_counts: Record<"raw" | "jpeg" | "other", number>;
+  phone_vs_camera_counts: Record<"phone" | "camera" | "unknown", number>;
   top_cameras: CountRow[];
   top_lenses: CountRow[];
   top_focal_lengths: CountRow[];
+  most_common_iso: CountRow | null;
+  most_common_aperture: CountRow | null;
+  most_common_shutter_speed: CountRow | null;
+  average_file_size_by_camera: AverageFileSizeByCameraRow[];
+  photos_with_capture_date: number;
+  photos_missing_capture_date: number;
   photos_by_year: CountRow[];
   photos_by_month: CountRow[];
   photo_timeline: TimelineInsightRow[];
+  camera_usage_timeline: UsageTimelineRow[];
+  lens_usage_timeline: UsageTimelineRow[];
   busiest_date: CountRow | null;
   newest_modified_at: string | null;
   oldest_modified_at: string | null;
@@ -60,8 +89,23 @@ type PhotoSearchFilters = {
   lens_model: string;
   min_focal_length: string;
   max_focal_length: string;
+  extension: string;
+  iso: string;
+  aperture: string;
+  shutter_speed: string;
   date_from: string;
   date_to: string;
+  device_type: string;
+};
+
+type PhotoSearchOptions = {
+  cameras: string[];
+  lenses: string[];
+  extensions: string[];
+  iso_values: number[];
+  aperture_values: number[];
+  shutter_speed_values: string[];
+  device_types: string[];
 };
 
 type DashboardPreferences = {
@@ -73,13 +117,20 @@ type DashboardPreferences = {
   showFavoriteLensCard: boolean;
   showFocalLengthCard: boolean;
   showBusiestDateCard: boolean;
+  showAverageFileSizeCard: boolean;
+  showTopStorageTypeCard: boolean;
+  showRawJpegCard: boolean;
+  showDeviceTypeCard: boolean;
+  showMostCommonIsoCard: boolean;
+  showMostCommonApertureCard: boolean;
+  showMostCommonShutterCard: boolean;
+  showAverageCameraSizeCard: boolean;
   showScanHistorySection: boolean;
   showMetadataSearchSection: boolean;
   showCameraChart: boolean;
   showLensChart: boolean;
   showTimelineChart: boolean;
   showFileTypeChart: boolean;
-  showFileTypeTable: boolean;
 };
 
 type SystemInfo = {
@@ -145,6 +196,7 @@ const TERMINAL_SCAN_STATUSES = ["completed", "failed", "interrupted", "cancelled
 const PHOTO_SEARCH_LIMIT = 25;
 const DASHBOARD_PREFERENCES_STORAGE_KEY = "image-insight-dashboard-preferences";
 const COMPACT_DASHBOARD_STORAGE_KEY = "image-insight-compact-dashboard";
+const CHART_SERIES_COLORS = ["#7dd3fc", "#a987ff", "#fbbf24"];
 const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   showTotalPhotosCard: true,
   showTotalSizeCard: true,
@@ -154,13 +206,20 @@ const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   showFavoriteLensCard: true,
   showFocalLengthCard: true,
   showBusiestDateCard: true,
+  showAverageFileSizeCard: true,
+  showTopStorageTypeCard: true,
+  showRawJpegCard: true,
+  showDeviceTypeCard: true,
+  showMostCommonIsoCard: true,
+  showMostCommonApertureCard: true,
+  showMostCommonShutterCard: true,
+  showAverageCameraSizeCard: true,
   showScanHistorySection: true,
   showMetadataSearchSection: true,
   showCameraChart: true,
   showLensChart: true,
   showTimelineChart: true,
   showFileTypeChart: true,
-  showFileTypeTable: true,
 };
 
 function formatBytes(bytes: number): string {
@@ -169,6 +228,10 @@ function formatBytes(bytes: number): string {
 
 function formatGigabytes(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function formatMegabytes(bytes: number): string {
+  return `${(bytes / 1024 ** 2).toFixed(2)} MB`;
 }
 
 function formatDate(value: string | null): string {
@@ -257,6 +320,30 @@ function loadDashboardPreferences(): DashboardPreferences {
         parsedPreferences.showBusiestDateCard ??
         parsedPreferences.showExifCards ??
         DEFAULT_DASHBOARD_PREFERENCES.showBusiestDateCard,
+      showAverageFileSizeCard:
+        parsedPreferences.showAverageFileSizeCard ??
+        DEFAULT_DASHBOARD_PREFERENCES.showAverageFileSizeCard,
+      showTopStorageTypeCard:
+        parsedPreferences.showTopStorageTypeCard ??
+        DEFAULT_DASHBOARD_PREFERENCES.showTopStorageTypeCard,
+      showRawJpegCard:
+        parsedPreferences.showRawJpegCard ??
+        DEFAULT_DASHBOARD_PREFERENCES.showRawJpegCard,
+      showDeviceTypeCard:
+        parsedPreferences.showDeviceTypeCard ??
+        DEFAULT_DASHBOARD_PREFERENCES.showDeviceTypeCard,
+      showMostCommonIsoCard:
+        parsedPreferences.showMostCommonIsoCard ??
+        DEFAULT_DASHBOARD_PREFERENCES.showMostCommonIsoCard,
+      showMostCommonApertureCard:
+        parsedPreferences.showMostCommonApertureCard ??
+        DEFAULT_DASHBOARD_PREFERENCES.showMostCommonApertureCard,
+      showMostCommonShutterCard:
+        parsedPreferences.showMostCommonShutterCard ??
+        DEFAULT_DASHBOARD_PREFERENCES.showMostCommonShutterCard,
+      showAverageCameraSizeCard:
+        parsedPreferences.showAverageCameraSizeCard ??
+        DEFAULT_DASHBOARD_PREFERENCES.showAverageCameraSizeCard,
       showScanHistorySection:
         parsedPreferences.showScanHistorySection ??
         DEFAULT_DASHBOARD_PREFERENCES.showScanHistorySection,
@@ -279,9 +366,6 @@ function loadDashboardPreferences(): DashboardPreferences {
         parsedPreferences.showFileTypeChart ??
         parsedPreferences.showCharts ??
         DEFAULT_DASHBOARD_PREFERENCES.showFileTypeChart,
-      showFileTypeTable:
-        parsedPreferences.showFileTypeTable ??
-        DEFAULT_DASHBOARD_PREFERENCES.showFileTypeTable,
     };
   } catch {
     return DEFAULT_DASHBOARD_PREFERENCES;
@@ -306,6 +390,34 @@ function topLabel(rows: CountRow[]): string {
 
 function topCount(rows: CountRow[]): string | null {
   return rows[0] ? `${rows[0].count.toLocaleString()} photos` : null;
+}
+
+function usageTimelineKeys(rows: UsageTimelineRow[]): string[] {
+  return Array.from(
+    new Set(
+      rows.flatMap((row) => Object.keys(row).filter((key) => key !== "label")),
+    ),
+  );
+}
+
+function topStorageLabel(rows: SizeRow[]): string {
+  const row = rows[0];
+
+  if (!row) {
+    return "No data yet";
+  }
+
+  return `${row.label.toUpperCase()} ${formatGigabytes(row.size_bytes)}`;
+}
+
+function topAverageCameraSize(rows: AverageFileSizeByCameraRow[]): string {
+  const row = rows[0];
+
+  if (!row) {
+    return "No data yet";
+  }
+
+  return row.label;
 }
 
 function TimelineTooltip({
@@ -489,10 +601,17 @@ function App() {
     lens_model: "",
     min_focal_length: "",
     max_focal_length: "",
+    extension: "",
+    iso: "",
+    aperture: "",
+    shutter_speed: "",
     date_from: "",
     date_to: "",
+    device_type: "",
   });
   const [photoSearch, setPhotoSearch] = useState<PhotoSearchResponse | null>(null);
+  const [photoSearchOptions, setPhotoSearchOptions] =
+    useState<PhotoSearchOptions | null>(null);
   const [isSearchingPhotos, setIsSearchingPhotos] = useState(false);
   const [photoSearchError, setPhotoSearchError] = useState<string | null>(null);
   const [copiedPhotoId, setCopiedPhotoId] = useState<number | null>(null);
@@ -576,6 +695,20 @@ function App() {
     }
   }, []);
 
+  const loadPhotoSearchOptions = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/photos/search-options`);
+
+      if (!response.ok) {
+        throw new Error(`Search options request failed with ${response.status}`);
+      }
+
+      setPhotoSearchOptions((await response.json()) as PhotoSearchOptions);
+    } catch {
+      setPhotoSearchOptions(null);
+    }
+  }, []);
+
   const runPhotoSearch = useCallback(async () => {
     const params = new URLSearchParams({
       limit: String(Math.min(PHOTO_SEARCH_LIMIT, 500)),
@@ -623,7 +756,8 @@ function App() {
     loadStats();
     void loadSystemInfo();
     void loadScanHistory();
-  }, [loadScanHistory, loadStats, loadSystemInfo]);
+    void loadPhotoSearchOptions();
+  }, [loadPhotoSearchOptions, loadScanHistory, loadStats, loadSystemInfo]);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -888,15 +1022,27 @@ function App() {
 
   const fileTypeChartData = useMemo(
     () =>
-      fileTypeRows.map(([extension, count]) => ({
-        extension,
-        count,
+      (stats?.average_file_size_by_file_type ?? []).map((row) => ({
+        extension: row.label.toUpperCase(),
+        average_file_size_mb: Number(
+          (row.average_file_size_bytes / 1024 ** 2).toFixed(2),
+        ),
       })),
-    [fileTypeRows],
+    [stats?.average_file_size_by_file_type],
   );
   const cameraChartData = stats?.top_cameras.slice(0, 8) ?? [];
   const lensChartData = stats?.top_lenses.slice(0, 8) ?? [];
   const timelineChartData = stats?.photo_timeline ?? [];
+  const cameraUsageTimelineData = stats?.camera_usage_timeline ?? [];
+  const lensUsageTimelineData = stats?.lens_usage_timeline ?? [];
+  const cameraUsageTimelineKeys = useMemo(
+    () => usageTimelineKeys(cameraUsageTimelineData),
+    [cameraUsageTimelineData],
+  );
+  const lensUsageTimelineKeys = useMemo(
+    () => usageTimelineKeys(lensUsageTimelineData),
+    [lensUsageTimelineData],
+  );
   const showAnyStatCard =
     dashboardPreferences.showTotalPhotosCard ||
     dashboardPreferences.showTotalSizeCard ||
@@ -905,7 +1051,15 @@ function App() {
     dashboardPreferences.showFavoriteCameraCard ||
     dashboardPreferences.showFavoriteLensCard ||
     dashboardPreferences.showFocalLengthCard ||
-    dashboardPreferences.showBusiestDateCard;
+    dashboardPreferences.showBusiestDateCard ||
+    dashboardPreferences.showAverageFileSizeCard ||
+    dashboardPreferences.showTopStorageTypeCard ||
+    dashboardPreferences.showRawJpegCard ||
+    dashboardPreferences.showDeviceTypeCard ||
+    dashboardPreferences.showMostCommonIsoCard ||
+    dashboardPreferences.showMostCommonApertureCard ||
+    dashboardPreferences.showMostCommonShutterCard ||
+    dashboardPreferences.showAverageCameraSizeCard;
   const showAnyInsightChart =
     dashboardPreferences.showCameraChart ||
     dashboardPreferences.showLensChart ||
@@ -920,6 +1074,14 @@ function App() {
     dashboardPreferences.showFavoriteLensCard,
     dashboardPreferences.showFocalLengthCard,
     dashboardPreferences.showBusiestDateCard,
+    dashboardPreferences.showAverageFileSizeCard,
+    dashboardPreferences.showTopStorageTypeCard,
+    dashboardPreferences.showRawJpegCard,
+    dashboardPreferences.showDeviceTypeCard,
+    dashboardPreferences.showMostCommonIsoCard,
+    dashboardPreferences.showMostCommonApertureCard,
+    dashboardPreferences.showMostCommonShutterCard,
+    dashboardPreferences.showAverageCameraSizeCard,
   ].filter(Boolean).length;
   const visibleInsightCount = [
     dashboardPreferences.showCameraChart,
@@ -928,7 +1090,6 @@ function App() {
     dashboardPreferences.showFileTypeChart,
     dashboardPreferences.showScanHistorySection,
     dashboardPreferences.showMetadataSearchSection,
-    dashboardPreferences.showFileTypeTable,
   ].filter(Boolean).length;
   const hasInsightData = stats !== null && stats.total_photos > 0;
   const hasNoPhotoData = stats !== null && stats.total_photos === 0;
@@ -1125,6 +1286,27 @@ function App() {
                     />
                     Busiest date
                   </label>
+                  {(
+                    [
+                      ["showAverageFileSizeCard", "Average file"],
+                      ["showTopStorageTypeCard", "Top storage type"],
+                      ["showRawJpegCard", "RAW / JPEG"],
+                      ["showDeviceTypeCard", "Phone / camera"],
+                      ["showMostCommonIsoCard", "ISO"],
+                      ["showMostCommonApertureCard", "Aperture"],
+                      ["showMostCommonShutterCard", "Shutter"],
+                      ["showAverageCameraSizeCard", "Camera average size"],
+                    ] as Array<[keyof DashboardPreferences, string]>
+                  ).map(([key, label]) => (
+                    <label key={key}>
+                      <input
+                        type="checkbox"
+                        checked={dashboardPreferences[key]}
+                        onChange={() => updateDashboardPreference(key)}
+                      />
+                      {label}
+                    </label>
+                  ))}
                 </div>
               </div>
               <div className="customize-group">
@@ -1185,16 +1367,6 @@ function App() {
                       }
                     />
                     Metadata search
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={dashboardPreferences.showFileTypeTable}
-                      onChange={() =>
-                        updateDashboardPreference("showFileTypeTable")
-                      }
-                    />
-                    File type table
                   </label>
                 </div>
               </div>
@@ -1281,30 +1453,163 @@ function App() {
                   )}
                 </article>
               )}
+              {dashboardPreferences.showAverageFileSizeCard && (
+              <article className="stat-card insight-default-card file-insight-card">
+                <span>Average File</span>
+                <strong>{formatMegabytes(stats.average_file_size_bytes)}</strong>
+              </article>
+              )}
+              {dashboardPreferences.showTopStorageTypeCard && (
+              <article className="stat-card insight-default-card file-insight-card">
+                <span>Top Storage Type</span>
+                <strong>{topStorageLabel(stats.storage_by_file_type)}</strong>
+              </article>
+              )}
+              {dashboardPreferences.showRawJpegCard && (
+              <article className="stat-card insight-default-card file-insight-card">
+                <span>RAW / JPEG</span>
+                <strong>
+                  {stats.raw_vs_jpeg_counts.raw.toLocaleString()} /{" "}
+                  {stats.raw_vs_jpeg_counts.jpeg.toLocaleString()}
+                </strong>
+                <small>{stats.raw_vs_jpeg_counts.other.toLocaleString()} other</small>
+              </article>
+              )}
+              {dashboardPreferences.showDeviceTypeCard && (
+              <article className="stat-card insight-default-card camera-insight-card">
+                <span>Phone / Camera</span>
+                <strong>
+                  {stats.phone_vs_camera_counts.phone.toLocaleString()} /{" "}
+                  {stats.phone_vs_camera_counts.camera.toLocaleString()}
+                </strong>
+                <small>
+                  {stats.phone_vs_camera_counts.unknown.toLocaleString()} unknown
+                </small>
+              </article>
+              )}
+              {dashboardPreferences.showMostCommonIsoCard && (
+              <article className="stat-card insight-default-card exposure-insight-card">
+                <span>Most Common ISO</span>
+                <strong>{stats.most_common_iso?.label ?? "No data yet"}</strong>
+                {stats.most_common_iso && (
+                  <small>{stats.most_common_iso.count.toLocaleString()} photos</small>
+                )}
+              </article>
+              )}
+              {dashboardPreferences.showMostCommonApertureCard && (
+              <article className="stat-card insight-default-card exposure-insight-card">
+                <span>Most Common Aperture</span>
+                <strong>{stats.most_common_aperture?.label ?? "No data yet"}</strong>
+                {stats.most_common_aperture && (
+                  <small>
+                    {stats.most_common_aperture.count.toLocaleString()} photos
+                  </small>
+                )}
+              </article>
+              )}
+              {dashboardPreferences.showMostCommonShutterCard && (
+              <article className="stat-card insight-default-card exposure-insight-card">
+                <span>Most Common Shutter</span>
+                <strong>
+                  {stats.most_common_shutter_speed?.label ?? "No data yet"}
+                </strong>
+                {stats.most_common_shutter_speed && (
+                  <small>
+                    {stats.most_common_shutter_speed.count.toLocaleString()} photos
+                  </small>
+                )}
+              </article>
+              )}
+              {dashboardPreferences.showAverageCameraSizeCard && (
+              <article className="stat-card insight-default-card camera-insight-card">
+                <span>Largest Average Camera</span>
+                <strong>{topAverageCameraSize(stats.average_file_size_by_camera)}</strong>
+                {stats.average_file_size_by_camera[0] && (
+                  <small>
+                    {formatMegabytes(
+                      stats.average_file_size_by_camera[0].average_file_size_bytes,
+                    )}{" "}
+                    average
+                  </small>
+                )}
+              </article>
+              )}
             </section>
           )}
 
           {showAnyInsightChart && (
-            <>
-              {(dashboardPreferences.showCameraChart ||
-                dashboardPreferences.showLensChart) && (
-              <div className="chart-grid">
-                {dashboardPreferences.showCameraChart && (
-                <section className="chart-section">
+            <div className="insight-module-grid">
+              {dashboardPreferences.showCameraChart && (
+                <section className="chart-section camera-module">
                   <div className="section-heading">
-                    <h2>Camera Usage</h2>
-                    <span>{cameraChartData.length} cameras</span>
+                    <h2>
+                      {cameraUsageTimelineData.length > 0
+                        ? "Camera Usage Over Time"
+                        : "Camera Usage"}
+                    </h2>
+                    <span>
+                      {cameraUsageTimelineData.length > 0
+                        ? `${cameraUsageTimelineKeys.length} cameras`
+                        : `${cameraChartData.length} cameras`}
+                    </span>
                   </div>
 
-                  {cameraChartData.length > 0 ? (
+                  {cameraUsageTimelineData.length > 0 &&
+                  cameraUsageTimelineKeys.length > 0 ? (
                     <div className="chart-frame">
                       <ResponsiveContainer width="100%" height={280}>
-                        <BarChart data={cameraChartData}>
+                        <LineChart
+                          data={cameraUsageTimelineData}
+                          margin={{ top: 12, right: 14, bottom: 28, left: 0 }}
+                        >
                           <CartesianGrid stroke="#273244" vertical={false} />
-                          <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#c6d3e6"
+                            tickLine={false}
+                            axisLine={false}
+                            height={42}
+                            tick={{ fontSize: 11 }}
+                          />
                           <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.1)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                          <Bar dataKey="count" fill="#7dd3fc" radius={[6, 6, 0, 0]} />
+                          <Tooltip contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          {cameraUsageTimelineKeys.map((key, index) => (
+                            <Line
+                              key={key}
+                              type="monotone"
+                              dataKey={key}
+                              stroke={
+                                CHART_SERIES_COLORS[
+                                  index % CHART_SERIES_COLORS.length
+                                ]
+                              }
+                              strokeWidth={2.5}
+                              dot={{ r: 2 }}
+                              activeDot={{ r: 5 }}
+                            />
+                          ))}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : cameraChartData.length > 0 ? (
+                    <div className="chart-frame">
+                      <ResponsiveContainer width="100%" height={280}>
+                        <BarChart
+                          data={cameraChartData}
+                          margin={{ top: 8, right: 8, bottom: 36, left: 0 }}
+                        >
+                          <CartesianGrid stroke="#273244" vertical={false} />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#c6d3e6"
+                            tickLine={false}
+                            axisLine={false}
+                            height={14}
+                            tick={false}
+                          />
+                          <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.16)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          <Bar dataKey="count" fill="#4ade80" radius={[6, 6, 0, 0]} activeBar={{ fill: "#bfffea" }} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -1312,24 +1617,79 @@ function App() {
                     <p className="empty-chart">Run a scan with EXIF data to populate camera usage.</p>
                   )}
                 </section>
-                )}
+              )}
 
-                {dashboardPreferences.showLensChart && (
-                <section className="chart-section">
+              {dashboardPreferences.showLensChart && (
+                <section className="chart-section lens-module">
                   <div className="section-heading">
-                    <h2>Lens Usage</h2>
-                    <span>{lensChartData.length} lenses</span>
+                    <h2>
+                      {lensUsageTimelineData.length > 0
+                        ? "Lens Usage Over Time"
+                        : "Lens Usage"}
+                    </h2>
+                    <span>
+                      {lensUsageTimelineData.length > 0
+                        ? `${lensUsageTimelineKeys.length} lenses`
+                        : `${lensChartData.length} lenses`}
+                    </span>
                   </div>
 
-                  {lensChartData.length > 0 ? (
+                  {lensUsageTimelineData.length > 0 &&
+                  lensUsageTimelineKeys.length > 0 ? (
                     <div className="chart-frame">
                       <ResponsiveContainer width="100%" height={280}>
-                        <BarChart data={lensChartData}>
+                        <LineChart
+                          data={lensUsageTimelineData}
+                          margin={{ top: 12, right: 14, bottom: 28, left: 0 }}
+                        >
                           <CartesianGrid stroke="#273244" vertical={false} />
-                          <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#c6d3e6"
+                            tickLine={false}
+                            axisLine={false}
+                            height={42}
+                            tick={{ fontSize: 11 }}
+                          />
                           <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                          <Tooltip cursor={{ fill: "rgba(169, 135, 255, 0.1)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                          <Bar dataKey="count" fill="#8fb6ff" radius={[6, 6, 0, 0]} />
+                          <Tooltip contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          {lensUsageTimelineKeys.map((key, index) => (
+                            <Line
+                              key={key}
+                              type="monotone"
+                              dataKey={key}
+                              stroke={
+                                CHART_SERIES_COLORS[
+                                  index % CHART_SERIES_COLORS.length
+                                ]
+                              }
+                              strokeWidth={2.5}
+                              dot={{ r: 2 }}
+                              activeDot={{ r: 5 }}
+                            />
+                          ))}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : lensChartData.length > 0 ? (
+                    <div className="chart-frame">
+                      <ResponsiveContainer width="100%" height={280}>
+                        <BarChart
+                          data={lensChartData}
+                          margin={{ top: 8, right: 8, bottom: 36, left: 0 }}
+                        >
+                          <CartesianGrid stroke="#273244" vertical={false} />
+                          <XAxis
+                            dataKey="label"
+                            stroke="#c6d3e6"
+                            tickLine={false}
+                            axisLine={false}
+                            height={14}
+                            tick={false}
+                          />
+                          <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                          <Tooltip cursor={{ fill: "rgba(169, 135, 255, 0.16)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                          <Bar dataKey="count" fill="#a987ff" radius={[6, 6, 0, 0]} activeBar={{ fill: "#d7c7ff" }} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -1337,19 +1697,16 @@ function App() {
                     <p className="empty-chart">Run a scan with EXIF data to populate lens usage.</p>
                   )}
                 </section>
-                )}
-              </div>
               )}
 
               {dashboardPreferences.showTimelineChart &&
                 timelineChartData.length > 0 && (
-              <section className="chart-section">
+              <section className="chart-section timeline-module">
                 <div className="section-heading">
                   <div>
-                    <h2>Capture Timeline where available</h2>
+                    <h2>Capture Timeline</h2>
                     <span>
-                      Imported or exported archives may contain added/export dates
-                      instead of true capture dates.
+                      Only files with capture dates and capture metadata are included.
                     </span>
                   </div>
                   <span>{timelineChartData.length} months</span>
@@ -1357,12 +1714,22 @@ function App() {
 
                 <div className="chart-frame">
                   <ResponsiveContainer width="100%" height={280}>
-                    <LineChart data={timelineChartData}>
+                    <LineChart
+                      data={timelineChartData}
+                      margin={{ top: 12, right: 14, bottom: 28, left: 0 }}
+                    >
                       <CartesianGrid stroke="#273244" vertical={false} />
-                      <XAxis dataKey="label" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                      <XAxis
+                        dataKey="label"
+                        stroke="#c6d3e6"
+                        tickLine={false}
+                        axisLine={false}
+                        height={42}
+                        tick={{ fontSize: 11 }}
+                      />
                       <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
                       <Tooltip content={<TimelineTooltip />} />
-                      <Line type="monotone" dataKey="count" stroke="#a987ff" strokeWidth={3} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="count" stroke="#f472b6" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 6, fill: "#fdf2f8" }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -1370,21 +1737,31 @@ function App() {
               )}
 
               {dashboardPreferences.showFileTypeChart && (
-              <section className="chart-section">
+              <section className="chart-section compact-module file-type-module">
                 <div className="section-heading">
-                  <h2>File Type Distribution</h2>
+                  <h2>Average File Size by Type</h2>
                   <span>{fileTypeRows.length} types</span>
                 </div>
 
                 {fileTypeChartData.length > 0 ? (
                   <div className="chart-frame compact-chart">
                     <ResponsiveContainer width="100%" height={240}>
-                      <BarChart data={fileTypeChartData}>
+                      <BarChart
+                        data={fileTypeChartData}
+                        margin={{ top: 8, right: 6, bottom: 24, left: 0 }}
+                      >
                         <CartesianGrid stroke="#273244" vertical={false} />
-                        <XAxis dataKey="extension" stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                        <XAxis
+                          dataKey="extension"
+                          stroke="#c6d3e6"
+                          tickLine={false}
+                          axisLine={false}
+                          height={38}
+                          tick={{ fontSize: 11 }}
+                        />
                         <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
-                        <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.1)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
-                        <Bar dataKey="count" fill="#7dd3fc" radius={[6, 6, 0, 0]} />
+                        <Tooltip cursor={{ fill: "rgba(251, 191, 36, 0.16)" }} contentStyle={{ background: "#121a26", border: "1px solid #2f3d52", borderRadius: "8px", color: "#edf5ff" }} />
+                        <Bar dataKey="average_file_size_mb" fill="#fbbf24" radius={[6, 6, 0, 0]} activeBar={{ fill: "#fde68a" }} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -1393,39 +1770,7 @@ function App() {
                 )}
               </section>
               )}
-            </>
-          )}
-
-          {dashboardPreferences.showFileTypeTable && (
-          <section className="table-section">
-            <div className="section-heading">
-              <h2>File Type Counts</h2>
-              <span>{stats.total_photos.toLocaleString()} indexed photos</span>
             </div>
-
-            <table>
-              <thead>
-                <tr>
-                  <th>Extension</th>
-                  <th>Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {fileTypeRows.length > 0 ? (
-                  fileTypeRows.map(([extension, count]) => (
-                    <tr key={extension}>
-                      <td>{extension.toUpperCase()}</td>
-                      <td>{count.toLocaleString()}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={2}>No photo data yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </section>
           )}
         </section>
       )}
@@ -1782,23 +2127,67 @@ function App() {
             Camera
             <input
               type="text"
+              list="camera-options"
               value={photoSearchFilters.camera_model}
               onChange={(event) =>
                 updatePhotoSearchFilter("camera_model", event.target.value)
               }
               placeholder="EOS R5"
             />
+            <datalist id="camera-options">
+              {photoSearchOptions?.cameras.map((camera) => (
+                <option key={camera} value={camera} />
+              ))}
+            </datalist>
           </label>
           <label>
             Lens
             <input
               type="text"
+              list="lens-options"
               value={photoSearchFilters.lens_model}
               onChange={(event) =>
                 updatePhotoSearchFilter("lens_model", event.target.value)
               }
               placeholder="RF50"
             />
+            <datalist id="lens-options">
+              {photoSearchOptions?.lenses.map((lens) => (
+                <option key={lens} value={lens} />
+              ))}
+            </datalist>
+          </label>
+          <label>
+            Type
+            <select
+              value={photoSearchFilters.extension}
+              onChange={(event) =>
+                updatePhotoSearchFilter("extension", event.target.value)
+              }
+            >
+              <option value="">Any</option>
+              {photoSearchOptions?.extensions.map((extension) => (
+                <option key={extension} value={extension}>
+                  {extension.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Device
+            <select
+              value={photoSearchFilters.device_type}
+              onChange={(event) =>
+                updatePhotoSearchFilter("device_type", event.target.value)
+              }
+            >
+              <option value="">Any</option>
+              {photoSearchOptions?.device_types.map((deviceType) => (
+                <option key={deviceType} value={deviceType}>
+                  {deviceType}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Min Focal
@@ -1825,6 +2214,54 @@ function App() {
               }
               placeholder="85"
             />
+          </label>
+          <label>
+            ISO
+            <select
+              value={photoSearchFilters.iso}
+              onChange={(event) =>
+                updatePhotoSearchFilter("iso", event.target.value)
+              }
+            >
+              <option value="">Any</option>
+              {photoSearchOptions?.iso_values.map((isoValue) => (
+                <option key={isoValue} value={isoValue}>
+                  {isoValue}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Aperture
+            <select
+              value={photoSearchFilters.aperture}
+              onChange={(event) =>
+                updatePhotoSearchFilter("aperture", event.target.value)
+              }
+            >
+              <option value="">Any</option>
+              {photoSearchOptions?.aperture_values.map((apertureValue) => (
+                <option key={apertureValue} value={apertureValue}>
+                  f/{apertureValue}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Shutter
+            <select
+              value={photoSearchFilters.shutter_speed}
+              onChange={(event) =>
+                updatePhotoSearchFilter("shutter_speed", event.target.value)
+              }
+            >
+              <option value="">Any</option>
+              {photoSearchOptions?.shutter_speed_values.map((shutterSpeed) => (
+                <option key={shutterSpeed} value={shutterSpeed}>
+                  {shutterSpeed}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             From
