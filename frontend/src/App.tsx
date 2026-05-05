@@ -339,6 +339,39 @@ function formatMegabytes(bytes: number): string {
   return `${(bytes / 1024 ** 2).toFixed(2)} MB`;
 }
 
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function formatAnalyticsValue(value: string | number | undefined): string {
+  if (value === undefined) {
+    return "—";
+  }
+
+  if (typeof value !== "number") {
+    return value;
+  }
+
+  return formatCompactNumber(value);
+}
+
+function formatAnalyticsAxisValue(value: string | number): string {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue)) {
+    return String(value);
+  }
+
+  if (Math.abs(numberValue) >= 1024 ** 3) {
+    return `${(numberValue / 1024 ** 3).toFixed(1)}GB`;
+  }
+
+  return formatCompactNumber(numberValue);
+}
+
 function formatDate(value: string | null): string {
   if (!value) {
     return "No data yet";
@@ -783,6 +816,79 @@ function SearchIcon() {
   );
 }
 
+function AnalyticsIcon() {
+  return (
+    <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+      <path
+        d="M8 31h24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 31V20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <path
+        d="M20 31V12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <path
+        d="M28 31V16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 17l8-6 8 4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.7"
+      />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+      <circle
+        cx="20"
+        cy="20"
+        r="5.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.6"
+      />
+      <path
+        d="M20 7v5M20 28v5M7 20h5M28 20h5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10.8 10.8l3.5 3.5M25.7 25.7l3.5 3.5M29.2 10.8l-3.5 3.5M14.3 25.7l-3.5 3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
@@ -835,6 +941,7 @@ function App() {
   const [analyticsResult, setAnalyticsResult] = useState<AnalyticsResponse | null>(null);
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [isRawAnalyticsDataOpen, setIsRawAnalyticsDataOpen] = useState(false);
   const [copiedPhotoId, setCopiedPhotoId] = useState<number | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<ActiveTool>(null);
@@ -1020,6 +1127,7 @@ function App() {
       }
 
       setAnalyticsResult((await response.json()) as AnalyticsResponse);
+      setIsRawAnalyticsDataOpen(false);
     } catch (caughtError) {
       setAnalyticsError(
         caughtError instanceof Error
@@ -1456,8 +1564,11 @@ function App() {
           type="button"
           className="settings-button"
           onClick={() => setIsSettingsOpen((currentValue) => !currentValue)}
+          aria-expanded={isSettingsOpen}
+          aria-controls="dashboard-settings"
         >
-          {isSettingsOpen ? "Close Settings" : "Settings"}
+          <SettingsIcon />
+          <span>{isSettingsOpen ? "Close Settings" : "Settings"}</span>
         </button>
       </section>
 
@@ -2178,7 +2289,7 @@ function App() {
             aria-expanded={activeTool === "analytics"}
           >
             <span className="tool-card-icon analytics-icon" aria-hidden="true">
-              <SearchIcon />
+              <AnalyticsIcon />
             </span>
             <span className="tool-card-copy">
               <strong>Analytics Explorer</strong>
@@ -2901,7 +3012,14 @@ function App() {
                 {formatOptionLabel(analyticsResult.metric)} by{" "}
                 {formatOptionLabel(analyticsResult.x_axis)}
               </h2>
-              <span>{analyticsResult.rows.length} points</span>
+              <span>
+                {analyticsResult.rows.length.toLocaleString()} rows · Compare by{" "}
+                {formatOptionLabel(analyticsResult.x_axis)} · Measure{" "}
+                {formatOptionLabel(analyticsResult.metric)} · Group by{" "}
+                {analyticsResult.group_by
+                  ? formatOptionLabel(analyticsResult.group_by)
+                  : "None"}
+              </span>
             </div>
             <div
               className={`chart-frame${
@@ -2922,7 +3040,7 @@ function App() {
                 analyticsResult.x_axis.startsWith("capture_") ? (
                   <LineChart
                     data={analyticsResult.rows}
-                    margin={{ top: 12, right: 14, bottom: 28, left: 0 }}
+                    margin={{ top: 12, right: 18, bottom: 28, left: 18 }}
                   >
                     <CartesianGrid stroke="#273244" vertical={false} />
                     <XAxis
@@ -2933,7 +3051,15 @@ function App() {
                       height={42}
                       tick={{ fontSize: 11 }}
                     />
-                    <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                    <YAxis
+                      allowDecimals={false}
+                      stroke="#a7b3c6"
+                      tickLine={false}
+                      axisLine={false}
+                      width={58}
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={formatAnalyticsAxisValue}
+                    />
                     <Tooltip content={<SeriesTooltip />} />
                     {(analyticsResult.group_by
                       ? analyticsResult.series
@@ -2955,7 +3081,7 @@ function App() {
                 ) : (
                   <BarChart
                     data={analyticsResult.rows}
-                    margin={{ top: 8, right: 8, bottom: 36, left: 0 }}
+                    margin={{ top: 8, right: 18, bottom: 36, left: 18 }}
                   >
                     <CartesianGrid stroke="#273244" vertical={false} />
                     <XAxis
@@ -2966,7 +3092,15 @@ function App() {
                       height={38}
                       tick={{ fontSize: 11 }}
                     />
-                    <YAxis allowDecimals={false} stroke="#a7b3c6" tickLine={false} axisLine={false} />
+                    <YAxis
+                      allowDecimals={false}
+                      stroke="#a7b3c6"
+                      tickLine={false}
+                      axisLine={false}
+                      width={58}
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={formatAnalyticsAxisValue}
+                    />
                     <Tooltip cursor={{ fill: "rgba(125, 211, 252, 0.16)" }} content={<SeriesTooltip />} />
                     <Bar dataKey="value" fill="#7dd3fc" radius={[6, 6, 0, 0]} activeBar={{ fill: "#bfffea" }} />
                   </BarChart>
@@ -2974,34 +3108,54 @@ function App() {
               </ResponsiveContainer>
               </div>
             </div>
-            <div className="analytics-result-list">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{formatOptionLabel(analyticsResult.x_axis)}</th>
-                    {(analyticsResult.group_by
-                      ? analyticsResult.series
-                      : ["value"]
-                    ).map((key) => (
-                      <th key={key}>{formatOptionLabel(key)}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {analyticsResult.rows.map((row) => (
-                    <tr key={String(row.label)}>
-                      <td>{row.label}</td>
+            <div className="raw-data-toggle">
+              <div>
+                <strong>Chart data</strong>
+                <span>
+                  {analyticsResult.rows.length.toLocaleString()} rows returned
+                </span>
+              </div>
+              <button
+                type="button"
+                className="small-action-button"
+                onClick={() =>
+                  setIsRawAnalyticsDataOpen((currentValue) => !currentValue)
+                }
+                aria-expanded={isRawAnalyticsDataOpen}
+              >
+                {isRawAnalyticsDataOpen ? "Hide" : "Show"}
+              </button>
+            </div>
+            {isRawAnalyticsDataOpen && (
+              <div className="analytics-result-list">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{formatOptionLabel(analyticsResult.x_axis)}</th>
                       {(analyticsResult.group_by
                         ? analyticsResult.series
                         : ["value"]
                       ).map((key) => (
-                        <td key={key}>{row[key] ?? "—"}</td>
+                        <th key={key}>{formatOptionLabel(key)}</th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {analyticsResult.rows.map((row) => (
+                      <tr key={String(row.label)}>
+                        <td>{row.label}</td>
+                        {(analyticsResult.group_by
+                          ? analyticsResult.series
+                          : ["value"]
+                        ).map((key) => (
+                          <td key={key}>{formatAnalyticsValue(row[key])}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         )}
       </section>

@@ -1,0 +1,17 @@
+[package]
+name = "image-insight"
+version = "0.1.0"
+description = "Local-first media metadata analytics desktop shell."
+authors = ["Atreides64"]
+edition = "2021"
+
+[lib]
+name = "image_insight_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+

@@ -282,6 +282,38 @@ Then open:
 
 - Dashboard: `http://127.0.0.1:5173`
 
+## Desktop Shell
+
+The first desktop packaging step uses Tauri 2 as a native shell around the
+existing React/Vite frontend. This shell does not bundle or launch the FastAPI
+backend yet, so desktop development still expects the backend to be started
+separately when live API data is needed.
+
+Prerequisites:
+
+- Node/npm dependencies installed in `frontend/`
+- Rust/Cargo installed
+- Windows WebView2 runtime installed
+
+Run the desktop shell in development mode:
+
+```bash
+cd frontend
+npm run desktop:dev
+```
+
+This starts the existing Vite dev server and opens a Tauri desktop window. Build
+the desktop shell with:
+
+```bash
+cd frontend
+npm run desktop:build
+```
+
+The Tauri config lives in `frontend/src-tauri/`. Dev mode uses
+`http://localhost:5173`; packaged builds use the existing `frontend/dist`
+assets.
+
 By default, the frontend fetches the FastAPI backend at `http://127.0.0.1:8000`.
 To point it somewhere else, create `frontend/.env.local`:
 
